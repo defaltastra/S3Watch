@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
 #include "cJSON.h"
+#include <string.h>
 
 static const char *TAG = "SETTINGS";
 static uint8_t brightness = 30;
