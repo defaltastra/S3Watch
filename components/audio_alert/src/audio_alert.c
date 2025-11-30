@@ -80,6 +80,8 @@ static void play_pcm_16_mono_22k(const int16_t* pcm, size_t samples)
     (void)esp_codec_dev_set_out_mute(s_spk, true);
 }
 
+// Unused function - kept for potential future use
+#if 0
 static bool play_pcm_stream_i16(const int16_t* pcm, size_t samples, int sample_rate, int channels)
 {
     if (!s_ready && audio_alert_init() != ESP_OK) return false;
@@ -115,6 +117,7 @@ static bool play_pcm_stream_i16(const int16_t* pcm, size_t samples, int sample_r
     (void)esp_codec_dev_set_out_mute(s_spk, true);
     return true;
 }
+#endif
 
 static bool play_wav_from_spiffs(const char *path)
 {

@@ -60,7 +60,8 @@ CONFIG_BT_BLUEDROID_ENABLED=n
 CONFIG_BT_NIMBLE_ENABLED=y
 
 CONFIG_BT_NIMBLE_SM_SC=n
-CONFIG_BT_NIMBLE_LL_CFG_FEAT_LE_ENCRYPTION=n
+# Encryption support required by security manager (even if not actively used)
+CONFIG_BT_NIMBLE_LL_CFG_FEAT_LE_ENCRYPTION=y
 CONFIG_BT_NIMBLE_GATT_MAX_PROCS=2
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=1
@@ -74,8 +75,14 @@ CONFIG_BT_CLASSIC_ENABLED=n
 CONFIG_BTDM_CTRL_MODEM_SLEEP=y
 CONFIG_BTDM_CTRL_BLE_MAX_CONN_EFF=1
 
-#Uncomment below, if security needs to be disabled
-CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+# Enable security manager to handle pairing requests (but allow pairing without auth)
+# Temporarily disabled to avoid ble_sm_alg_aes_cmac linking errors
+# CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+# CONFIG_BT_NIMBLE_SM_SC=n
+# Encryption support is required by security manager even if not actively used
+# CONFIG_BT_NIMBLE_LL_CFG_FEAT_LE_ENCRYPTION=y
+# Use mbedTLS for crypto stack (required for security manager crypto functions)
+# CONFIG_BT_NIMBLE_CRYPTO_STACK_MBEDTLS=y
 
 # Enable BLE modem sleep in controller
 CONFIG_BT_CTRL_MODEM_SLEEP=y

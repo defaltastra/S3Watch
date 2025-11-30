@@ -91,9 +91,14 @@ esp_err_t pcf85063a_set_time(const struct tm *time)
     time_buf[1] = dec_to_bcd(time->tm_min) & PCF85063A_MINUTES_MASK;
     time_buf[2] = dec_to_bcd(time->tm_hour) & PCF85063A_HOURS_MASK;
     time_buf[3] = dec_to_bcd(time->tm_mday) & PCF85063A_DAYS_MASK;
-    time_buf[4] = getDayOfWeek(time->tm_mday, time->tm_mon, time->tm_year) & PCF85063A_WEEKDAYS_MASK;
-    time_buf[5] = dec_to_bcd(time->tm_mon) & PCF85063A_MONTHS_MASK;
-    time_buf[6] = dec_to_bcd(time->tm_year - 1900);
+    // getDayOfWeek expects month 1-12, tm_mon is 0-11, so add 1
+    // getDayOfWeek expects year as full year (e.g., 2025), tm_year is years since 1900, so add 1900
+    time_buf[4] = getDayOfWeek(time->tm_mday, time->tm_mon + 1, time->tm_year + 1900) & PCF85063A_WEEKDAYS_MASK;
+    // RTC chip stores months 1-12, tm_mon is 0-11, so add 1
+    time_buf[5] = dec_to_bcd(time->tm_mon + 1) & PCF85063A_MONTHS_MASK;
+    // RTC chip stores years 0-99 (2000-2099), get_time adds 100, so we subtract 100 here
+    // tm_year is years since 1900, so for 2025: 125 - 100 = 25 (correct for chip)
+    time_buf[6] = dec_to_bcd(time->tm_year - 100);
 
     return rtc_register_write(PCF85063A_SECONDS, time_buf, 7);
 }

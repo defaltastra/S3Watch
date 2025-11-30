@@ -2,6 +2,7 @@
 #include "sensors.h"
 #include "ui_fonts.h"
 #include "rtc_lib.h"
+#include "settings.h"
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -36,7 +37,16 @@ static void update_time_task(lv_timer_t* timer)
     bsp_display_lock(0);
     //if (active_screen_get() == watchface_screen) {
         if (label_hour) {
-            lv_label_set_text_fmt(label_hour, "%02d", rtc_get_hour());
+            int hour = rtc_get_hour();
+            bool is_24h = settings_get_time_format_24h();
+            if (is_24h) {
+                lv_label_set_text_fmt(label_hour, "%02d", hour);
+            } else {
+                // 12-hour format: 0->12, 1-11->1-11, 12->12, 13-23->1-11
+                int hour_12 = hour % 12;
+                if (hour_12 == 0) hour_12 = 12;
+                lv_label_set_text_fmt(label_hour, "%02d", hour_12);
+            }
         }
         if (label_minute) {
             lv_label_set_text_fmt(label_minute, "%02d", rtc_get_minute());
@@ -48,7 +58,10 @@ static void update_time_task(lv_timer_t* timer)
             lv_label_set_text_fmt(label_date, "%02d/%02d", rtc_get_day(), rtc_get_month());
         }
         if (label_weekday) {
-            lv_label_set_text(label_weekday, rtc_get_weekday_short_string());
+            const char *weekday_str = rtc_get_weekday_short_string();
+            if (weekday_str) {
+                lv_label_set_text(label_weekday, weekday_str);
+            }
         }
     //}
     bsp_display_unlock();

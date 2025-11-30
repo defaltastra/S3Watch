@@ -6,6 +6,7 @@
 #include "setting_timeout_screen.h"
 #include "setting_sound_screen.h"
 #include "setting_storage_screen.h"
+#include "setting_time_date_screen.h"
 
 #include "settings_screen.h"
 #include "esp_log.h"
@@ -18,17 +19,20 @@ static lv_obj_t* r1;
 static lv_obj_t* r2;
 static lv_obj_t* r3;
 static lv_obj_t* r4;
+static lv_obj_t* r5;
 
 static void open_goal(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_step_goal_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_timeout(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_timeout_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_sound(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_sound_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_storage(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_storage_screen_create(t); ui_dynamic_subtile_show(); } }
+static void open_time_date(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_time_date_screen_create(t); ui_dynamic_subtile_show(); } }
 static void refresh_values(lv_obj_t* content)
 {
     if (!content) return;
     uint32_t goal = settings_get_step_goal();
     uint32_t to = settings_get_display_timeout();
     bool snd = settings_get_sound();
+    bool time_24h = settings_get_time_format_24h();
     char buf[16];
 
     snprintf(buf, sizeof(buf), "%u", (unsigned)goal);
@@ -41,6 +45,9 @@ static void refresh_values(lv_obj_t* content)
     }
     else {
         lv_label_set_text(r3, "Off");
+    }
+    if (r4) {
+        lv_label_set_text(r4, time_24h ? "24h" : "12h");
     }
 }
 
@@ -134,7 +141,8 @@ void settings_menu_screen_create(lv_obj_t* parent)
     r1 = make_row(smenu_content, LV_SYMBOL_PLAY, "Step Goal", "--", open_goal);
     r2 = make_row(smenu_content, LV_SYMBOL_SETTINGS, "Display Timeout", "--", open_timeout);
     r3 = make_row(smenu_content, LV_SYMBOL_AUDIO, "Sound", "--", open_sound);
-    r4 = make_row(smenu_content, LV_SYMBOL_SAVE, "Storage", "Tools", open_storage);
+    r4 = make_row(smenu_content, LV_SYMBOL_EDIT, "Time & Date", "--", open_time_date);
+    r5 = make_row(smenu_content, LV_SYMBOL_SAVE, "Storage", "Tools", open_storage);
 
     refresh_values(smenu_content);
 

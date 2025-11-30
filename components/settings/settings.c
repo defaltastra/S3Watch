@@ -22,6 +22,7 @@ static bool sound_enabled = true;
 static bool bluetooth_enabled = true;
 static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
+static bool time_format_24h = true; // true = 24h format, false = 12h format
 static bool spiffs_ready = false;
 
 // Debounced save timer (to limit flash writes when sliders change)
@@ -119,6 +120,7 @@ static bool settings_write_json(void)
     cJSON_AddBoolToObject(root, "bluetooth_enabled", bluetooth_enabled);
     cJSON_AddNumberToObject(root, "notify_volume", (double)notify_volume);
     cJSON_AddNumberToObject(root, "step_goal", (double)step_goal);
+    cJSON_AddBoolToObject(root, "time_format_24h", time_format_24h);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -179,6 +181,8 @@ static bool settings_read_json(void)
     if (cJSON_IsNumber(j)) notify_volume = (uint8_t)j->valuedouble;
     j = cJSON_GetObjectItem(root, "step_goal");
     if (cJSON_IsNumber(j)) step_goal = (uint32_t)j->valuedouble;
+    j = cJSON_GetObjectItem(root, "time_format_24h");
+    if (cJSON_IsBool(j)) time_format_24h = cJSON_IsTrue(j);
     cJSON_Delete(root);
     // Apply to hardware where relevant
     bsp_display_brightness_set(brightness);
@@ -290,6 +294,18 @@ uint32_t settings_get_step_goal(void)
     return step_goal;
 }
 
+void settings_set_time_format_24h(bool enabled)
+{
+    time_format_24h = enabled;
+    ESP_LOGI(TAG, "Time format set to %s", enabled ? "24h" : "12h");
+    schedule_save();
+}
+
+bool settings_get_time_format_24h(void)
+{
+    return time_format_24h;
+}
+
 static void apply_defaults(void)
 {
     brightness = 30;
@@ -298,6 +314,7 @@ static void apply_defaults(void)
     notify_volume = 100;
     step_goal = 8000;
     bluetooth_enabled = true;
+    time_format_24h = true;
 }
 
 bool settings_reset_defaults(void)

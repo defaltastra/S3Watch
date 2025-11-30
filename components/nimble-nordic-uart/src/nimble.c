@@ -8,6 +8,10 @@
 #include "nvs_flash.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+// Temporarily disabled to avoid ble_sm_alg_aes_cmac linking errors
+//#ifdef CONFIG_BT_NIMBLE_SECURITY_ENABLE
+//#include "host/ble_sm.h"
+//#endif
 #include <freertos/FreeRTOS.h>
 
 static const char* _TAG = "NORDIC UART";
@@ -234,6 +238,19 @@ static int ble_gap_event_cb(struct ble_gap_event* event, void* arg) {
     return 0;
 }
 
+// Temporarily disabled to avoid ble_sm_alg_aes_cmac linking errors
+//#ifdef CONFIG_BT_NIMBLE_SECURITY_ENABLE
+// Security manager IO callback to handle pairing requests
+//static int ble_sm_io_cb(uint16_t conn_handle, const struct ble_sm_io *io, void *arg)
+//{
+//    (void)conn_handle;
+//    (void)arg;
+//    ESP_LOGI(_TAG, "BLE SM IO callback: action=%d", io ? io->action : -1);
+//    // Accept pairing without requiring authentication
+//    return 0;
+//}
+//#endif
+
 static void ble_app_on_sync_cb(void) {
     int ret = ble_hs_id_infer_auto(0, &ble_addr_type);
     if (ret != 0) {
@@ -323,6 +340,18 @@ esp_err_t _nordic_uart_start(const char* device_name, void (*callback)(enum nord
     // Bluetooth device name for advertisement
 
     ble_hs_cfg.sync_cb = ble_app_on_sync_cb;
+
+// Temporarily disabled to avoid ble_sm_alg_aes_cmac linking errors
+//#ifdef CONFIG_BT_NIMBLE_SECURITY_ENABLE
+//    // Configure security manager to allow pairing without authentication
+//    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
+//    ble_hs_cfg.sm_bonding = 0;  // Disable bonding
+//    ble_hs_cfg.sm_mitm = 0;     // Disable MITM protection
+//    ble_hs_cfg.sm_sc = 0;       // Disable secure connections
+//    ble_hs_cfg.sm_our_key_dist = 0;
+//    ble_hs_cfg.sm_their_key_dist = 0;
+//    // Note: IO callback is handled automatically by NimBLE when sm_io_cap is set
+//#endif
 
     ble_svc_gap_init();
     ble_svc_gatt_init();

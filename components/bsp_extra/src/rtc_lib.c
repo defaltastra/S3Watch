@@ -43,7 +43,12 @@ esp_err_t rtc_get_time(struct tm *time)
 
 esp_err_t rtc_set_time(const struct tm *time)
 {
-    return pcf85063a_set_time(time);
+    esp_err_t ret = pcf85063a_set_time(time);
+    if (ret == ESP_OK) {
+        // Update cached time immediately to avoid race condition
+        current_time = *time;
+    }
+    return ret;
 }
 
 int rtc_get_hour(void)
@@ -73,20 +78,26 @@ int rtc_get_month(void)
 
 int rtc_get_year(void)
 {
-    return current_time.tm_year + 1800;
+    return current_time.tm_year + 1900;
 }
 
 const char *rtc_get_weekday_string(void)
 {
-    return weekdays[current_time.tm_wday];
+    int wday = current_time.tm_wday;
+    if (wday < 0 || wday > 6) wday = 0; // Default to Sunday if invalid
+    return weekdays[wday];
 }
 
 const char *rtc_get_weekday_short_string(void)
 {
-    return weekdaysshort[current_time.tm_wday];
+    int wday = current_time.tm_wday;
+    if (wday < 0 || wday > 6) wday = 0; // Default to Sunday if invalid
+    return weekdaysshort[wday];
 }
 
 const char *rtc_get_month_string(void)
 {
-    return months[current_time.tm_mon];
+    int mon = current_time.tm_mon;
+    if (mon < 0 || mon > 11) mon = 0; // Default to January if invalid
+    return months[mon];
 }
