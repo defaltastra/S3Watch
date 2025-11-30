@@ -2,7 +2,6 @@
 #include "ui.h"
 #include "ui_fonts.h"
 #include "settings.h"
-#include "setting_step_goal_screen.h"
 #include "setting_timeout_screen.h"
 #include "setting_sound_screen.h"
 #include "setting_storage_screen.h"
@@ -19,9 +18,6 @@ static lv_obj_t* r1;
 static lv_obj_t* r2;
 static lv_obj_t* r3;
 static lv_obj_t* r4;
-static lv_obj_t* r5;
-
-static void open_goal(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_step_goal_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_timeout(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_timeout_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_sound(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_sound_screen_create(t); ui_dynamic_subtile_show(); } }
 static void open_storage(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_indev_active()); lv_obj_t* t = ui_dynamic_subtile_acquire(); if (t) { setting_storage_screen_create(t); ui_dynamic_subtile_show(); } }
@@ -29,25 +25,17 @@ static void open_time_date(lv_event_t* e) { (void)e; lv_indev_wait_release(lv_in
 static void refresh_values(lv_obj_t* content)
 {
     if (!content) return;
-    uint32_t goal = settings_get_step_goal();
     uint32_t to = settings_get_display_timeout();
-    bool snd = settings_get_sound();
+    uint8_t vol = settings_get_notify_volume();
     bool time_24h = settings_get_time_format_24h();
     char buf[16];
 
-    snprintf(buf, sizeof(buf), "%u", (unsigned)goal);
-    lv_label_set_text(r1, buf);
     const char* ttxt = (to == SETTINGS_DISPLAY_TIMEOUT_10S) ? "10 s" : (to == SETTINGS_DISPLAY_TIMEOUT_20S) ? "20 s" : (to == SETTINGS_DISPLAY_TIMEOUT_30S) ? "30 s" : "1 min";
-    lv_label_set_text(r2, ttxt);
-    if (snd) {
-        char sbuf[16]; snprintf(sbuf, sizeof(sbuf), "On (%u%%)", (unsigned)settings_get_notify_volume());
-        lv_label_set_text(r3, sbuf);
-    }
-    else {
-        lv_label_set_text(r3, "Off");
-    }
-    if (r4) {
-        lv_label_set_text(r4, time_24h ? "24h" : "12h");
+    lv_label_set_text(r1, ttxt);
+    snprintf(buf, sizeof(buf), "%u%%", (unsigned)vol);
+    lv_label_set_text(r2, buf);
+    if (r3) {
+        lv_label_set_text(r3, time_24h ? "24h" : "12h");
     }
 }
 
@@ -138,11 +126,10 @@ void settings_menu_screen_create(lv_obj_t* parent)
     lv_obj_set_flex_flow(smenu_content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(smenu_content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
-    r1 = make_row(smenu_content, LV_SYMBOL_PLAY, "Step Goal", "--", open_goal);
-    r2 = make_row(smenu_content, LV_SYMBOL_SETTINGS, "Display Timeout", "--", open_timeout);
-    r3 = make_row(smenu_content, LV_SYMBOL_AUDIO, "Sound", "--", open_sound);
-    r4 = make_row(smenu_content, LV_SYMBOL_EDIT, "Time & Date", "--", open_time_date);
-    r5 = make_row(smenu_content, LV_SYMBOL_SAVE, "Storage", "Tools", open_storage);
+    r1 = make_row(smenu_content, LV_SYMBOL_SETTINGS, "Display Timeout", "--", open_timeout);
+    r2 = make_row(smenu_content, LV_SYMBOL_AUDIO, "Volume", "--", open_sound);
+    r3 = make_row(smenu_content, LV_SYMBOL_EDIT, "Time & Date", "--", open_time_date);
+    r4 = make_row(smenu_content, LV_SYMBOL_SAVE, "Storage", "Tools", open_storage);
 
     refresh_values(smenu_content);
 

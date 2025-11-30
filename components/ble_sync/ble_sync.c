@@ -253,10 +253,12 @@ static void power_ble_evt(void* handler_arg, esp_event_base_t base, int32_t id, 
 
 esp_err_t ble_sync_init(void)
 {
-    esp_err_t err = ble_sync_set_enabled(true);
-    if (err != ESP_OK) {
-        return err;
-    }
+    // Don't force enable - let main.cpp set it based on settings
+    // This allows the default to be disabled
+    // esp_err_t err = ble_sync_set_enabled(true);
+    // if (err != ESP_OK) {
+    //     return err;
+    // }
 
     xTaskCreate(uartTask, "uartTask", 4000, NULL, 3, NULL);
 

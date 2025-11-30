@@ -7,7 +7,6 @@
 #include "esp_log.h"
 
 static lv_obj_t* ssound_screen;
-static lv_obj_t* s_switch;
 static lv_obj_t* s_slider;
 static lv_obj_t* s_value_lbl;
 static lv_obj_t* s_test_btn;
@@ -26,20 +25,7 @@ static void screen_events(lv_event_t* e)
     }
 }
 
-static void toggle(lv_event_t* e)
-{
-    bool on = lv_obj_has_state(s_switch, LV_STATE_CHECKED);
-    settings_set_sound(on);
-    // Enable/disable slider accordingly
-    if (s_slider) {
-        if (on) lv_obj_clear_state(s_slider, LV_STATE_DISABLED);
-        else lv_obj_add_state(s_slider, LV_STATE_DISABLED);
-    }
-    if (s_test_btn) {
-        if (on) lv_obj_clear_state(s_test_btn, LV_STATE_DISABLED);
-        else lv_obj_add_state(s_test_btn, LV_STATE_DISABLED);
-    }
-}
+// Toggle function removed - volume is always enabled now
 
 static void on_vol_change(lv_event_t* e)
 {
@@ -83,7 +69,7 @@ void setting_sound_screen_create(lv_obj_t* parent)
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_t* title = lv_label_create(hdr);
     lv_obj_set_style_text_font(title, &font_bold_32, 0);
-    lv_label_set_text(title, "Sound");
+    lv_label_set_text(title, "Volume");
 
     lv_obj_t* content = lv_obj_create(ssound_screen);
     lv_obj_remove_style_all(content);
@@ -93,43 +79,32 @@ void setting_sound_screen_create(lv_obj_t* parent)
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    s_switch = lv_switch_create(content);
-    lv_obj_set_size(s_switch, 120, 50);
-    if (settings_get_sound()) lv_obj_add_state(s_switch, LV_STATE_CHECKED);
-    else lv_obj_clear_state(s_switch, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(s_switch, toggle, LV_EVENT_VALUE_CHANGED, NULL);
-
-    // Volume row
-    lv_obj_t* row = lv_obj_create(content);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t* lbl = lv_label_create(row);
-    lv_obj_set_style_text_font(lbl, &font_normal_28, 0);
-    lv_label_set_text(lbl, "Notification Volume");
-
-    s_value_lbl = lv_label_create(row);
-    lv_obj_set_style_text_font(s_value_lbl, &font_bold_28, 0);
+    // Big volume value label
+    s_value_lbl = lv_label_create(content);
+    lv_obj_set_style_text_font(s_value_lbl, &font_bold_42, 0);
+    lv_obj_set_style_text_color(s_value_lbl, lv_color_hex(0xFFFF10), 0);
     char vbuf[8]; snprintf(vbuf, sizeof(vbuf), "%u%%", (unsigned)settings_get_notify_volume());
     lv_label_set_text(s_value_lbl, vbuf);
+    lv_obj_set_align(s_value_lbl, LV_ALIGN_CENTER);
+    lv_obj_set_y(s_value_lbl, -40);
 
+    // Volume slider
     s_slider = lv_slider_create(content);
-    lv_obj_set_width(s_slider, lv_pct(100));
+    lv_obj_set_width(s_slider, lv_pct(90));
+    lv_obj_set_height(s_slider, 30);
     lv_slider_set_range(s_slider, 0, 100);
     lv_slider_set_value(s_slider, settings_get_notify_volume(), LV_ANIM_OFF);
     lv_obj_add_event_cb(s_slider, on_vol_change, LV_EVENT_VALUE_CHANGED, NULL);
-    if (!settings_get_sound()) lv_obj_add_state(s_slider, LV_STATE_DISABLED);
+    lv_obj_set_align(s_slider, LV_ALIGN_CENTER);
 
     // Test sound button
     s_test_btn = lv_btn_create(content);
-    lv_obj_set_width(s_test_btn, lv_pct(100));
+    lv_obj_set_width(s_test_btn, lv_pct(90));
     lv_obj_t* test_lbl = lv_label_create(s_test_btn);
     lv_label_set_text(test_lbl, "Test Sound");
     lv_obj_center(test_lbl);
     lv_obj_add_event_cb(s_test_btn, test_btn_cb, LV_EVENT_CLICKED, NULL);
-    if (!settings_get_sound()) lv_obj_add_state(s_test_btn, LV_STATE_DISABLED);
+    lv_obj_set_align(s_test_btn, LV_ALIGN_CENTER);
 }
 
 static void on_delete(lv_event_t* e)

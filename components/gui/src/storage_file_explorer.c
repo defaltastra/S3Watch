@@ -5,7 +5,11 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <strings.h>
+#include <stdlib.h>
 #include "setting_storage_screen.h"
+#include "bsp/esp32_s3_touch_amoled_2_06.h"
+#include "media_player.h"
 
 static lv_obj_t* s_screen;
 static void on_delete(lv_event_t* e);
@@ -32,40 +36,141 @@ static void screen_events(lv_event_t* e)
 #  define LV_HAS_FILE_EXPLORER 0
 #endif*/
 
-//#if LV_HAS_FILE_EXPLORER
-//#include "lv_file_explorer.h"
 #include "lvgl_spiffs_fs.h"
-static void create_explorer_1(lv_obj_t* parent)
+#include "media_player.h"
+
+// Check if file is an image by extension
+static bool is_image_file(const char* filename)
 {
-    // Disabled: LVGL File Explorer widget was removed in LVGL 8.3+
-    LV_UNUSED(parent);
+    if (!filename) return false;
+    const char* ext = strrchr(filename, '.');
+    if (!ext) return false;
+    ext++; // Skip the dot
+    return (strcasecmp(ext, "jpg") == 0 || strcasecmp(ext, "jpeg") == 0 ||
+            strcasecmp(ext, "png") == 0 || strcasecmp(ext, "bmp") == 0 ||
+            strcasecmp(ext, "gif") == 0 ||
+            strcasecmp(ext, "raw") == 0 ||
+            strcasecmp(ext, "rgb565") == 0);
 }
-/*#else*/
-// Fallback: simple list of files from /spiffs using POSIX APIs
+
+
+// Cleanup handler for file path strings
+static void file_path_cleanup_cb(lv_event_t* e)
+{
+    char* filepath = (char*)lv_event_get_user_data(e);
+    if (filepath) {
+        free(filepath);
+    }
+}
+
+// File click handler - view image or set as watchface
+static void file_click_cb(lv_event_t* e)
+{
+    const char* filepath = (const char*)lv_event_get_user_data(e);
+    if (!filepath) return;
+    
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_CLICKED) {
+        // Single click - view image
+        ESP_LOGI(TAG, "Viewing image: %s", filepath);
+        media_viewer_show_image(filepath);
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        // Long press - set as watchface
+        ESP_LOGI(TAG, "Setting watchface: %s", filepath);
+        if (watchface_set_background_from_file(filepath) == ESP_OK) {
+            ESP_LOGI(TAG, "Watchface background set successfully");
+        } else {
+            ESP_LOGW(TAG, "Failed to set watchface background");
+        }
+    }
+    ESP_LOGI(TAG, "Button clicked, path = %s", filepath);
+media_viewer_show_image(filepath);
+
+}
+
+// Add files from a directory to the list
+static void add_files_from_dir(lv_obj_t* list, const char* dir_path, const char* prefix)
+{
+    DIR* dir = opendir(dir_path);
+    if (!dir) {
+        ESP_LOGW(TAG, "Cannot open directory: %s", dir_path);
+        return;
+    }
+    
+    struct dirent* de;
+    struct stat st;
+    while ((de = readdir(dir)) != NULL) {
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
+        
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s", dir_path, de->d_name);
+        
+        // Only show files we can handle (raw, rgb565, jpg, jpeg, png)
+        const char* ext = strrchr(de->d_name, '.');
+        if (!ext) continue;
+        ext++; // skip dot
+        if (!(strcasecmp(ext, "raw") == 0 || strcasecmp(ext, "rgb565") == 0 ||
+              strcasecmp(ext, "jpg") == 0 || strcasecmp(ext, "jpeg") == 0 ||
+              strcasecmp(ext, "png") == 0)) continue;
+    
+        long sz = 0;
+        if (stat(path, &st) == 0) {
+            sz = (long)st.st_size;
+        }
+    
+        char line[128];
+        snprintf(line, sizeof(line), "%s%s  (%ld KB)", prefix ? prefix : "", de->d_name, sz / 1024);
+        ESP_LOGI(TAG, "Found file: %s", de->d_name);
+    
+        lv_obj_t* btn = lv_list_add_button(list, LV_SYMBOL_IMAGE, line);
+        if (btn) {
+            // Store full path as user data
+            char* path_copy = strdup(path);
+            if (path_copy) {
+                lv_obj_add_event_cb(btn, file_click_cb, LV_EVENT_CLICKED, path_copy);
+                lv_obj_add_event_cb(btn, file_click_cb, LV_EVENT_LONG_PRESSED, path_copy);
+                lv_obj_add_event_cb(btn, file_path_cleanup_cb, LV_EVENT_DELETE, path_copy);
+            }
+        }
+    }
+    
+    closedir(dir);
+}
+
+// Create file explorer with SPIFFS and SD card support
 static void create_explorer_2(lv_obj_t* parent)
 {
     lv_obj_t* list = lv_list_create(parent);
     lv_obj_set_size(list, lv_pct(100), lv_pct(100));
-    lv_obj_t * btn;
-
-    DIR* dir = opendir("/spiffs");
-    if (!dir) {
-        //(void)lv_list_add_text(list, "Cannot open /spiffs");
-        btn = lv_list_add_button(list, LV_SYMBOL_WARNING, "Cannot open /spiffs");
-        return;
+    
+    // Try to mount SD card if not already mounted
+    extern sdmmc_card_t *bsp_sdcard;
+    bool sdcard_mounted = (bsp_sdcard != NULL);
+    
+    if (!sdcard_mounted) {
+        ESP_LOGI(TAG, "Attempting to mount SD card...");
+        esp_err_t ret = bsp_sdcard_mount();
+        if (ret == ESP_OK) {
+            sdcard_mounted = true;
+            ESP_LOGI(TAG, "SD card mounted successfully");
+        } else {
+            ESP_LOGW(TAG, "SD card mount failed: %s", esp_err_to_name(ret));
+        }
     }
-    struct dirent* de; struct stat st;
-    while ((de = readdir(dir)) != NULL) {
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-        char path[256]; snprintf(path, sizeof(path), "/spiffs/%s", de->d_name);
-        long sz = 0; if (stat(path, &st) == 0) sz = (long)st.st_size;
-        char line[128]; snprintf(line, sizeof(line), "%s  (%ld)", de->d_name, sz);
-        //lv_list_add_text(list, line);
-        btn = lv_list_add_button(list, LV_SYMBOL_FILE, line);
+    
+    // Add SD card section
+    if (sdcard_mounted) {
+        lv_list_add_text(list, "SD Card:");
+        add_files_from_dir(list, "/sdcard", "[SD] ");
+    } else {
+        lv_obj_t* btn = lv_list_add_button(list, LV_SYMBOL_WARNING, "SD Card not detected");
+        (void)btn; // Suppress unused warning
     }
-    closedir(dir);
+    
+    // Add SPIFFS section
+    lv_list_add_text(list, "Internal Storage:");
+    add_files_from_dir(list, "/spiffs", "[INT] ");
 }
-/*#endif*/
 
 void storage_file_explorer_screen_create(lv_obj_t* parent)
 {

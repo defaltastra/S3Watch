@@ -19,7 +19,7 @@ static const char *TAG = "SETTINGS";
 static uint8_t brightness = 30;
 static uint32_t display_timeout_ms = 30000;
 static bool sound_enabled = true;
-static bool bluetooth_enabled = true;
+static bool bluetooth_enabled = false; // Disabled by default
 static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
 static bool time_format_24h = true; // true = 24h format, false = 12h format

@@ -21,7 +21,7 @@
 // UI/BLE reagem a eventos de energia; remover ponte direta aqui
 #include "audio_alert.h"
 #include "ble_sync.h"
-
+#include "media_player.h"
 static const char *TAG = "MAIN";
 
 /*
@@ -71,6 +71,8 @@ extern "C" void app_main(void) {
   bsp_extra_init();
 
   settings_init();
+// After LVGL is initialized, register the filesystem driver
+media_player_init_lvgl_fs();
 
   esp_err_t ble_cfg_err = ble_sync_set_enabled(settings_get_bluetooth_enabled());
   if (ble_cfg_err != ESP_OK) {

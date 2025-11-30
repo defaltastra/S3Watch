@@ -14,354 +14,345 @@
 #include "esp_codec_dev.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 
-// Include minimp3 - it's a header-only library
-// We need to define MINIMP3_IMPLEMENTATION in one source file
-#define MINIMP3_IMPLEMENTATION
-#define MINIMP3_ONLY_MP3
-// Note: MINIMP3_ONLY_SIMD removed - ESP32-S3 doesn't have SSE/NEON support that minimp3 checks for
-#include "minimp3.h"
+static const char* TAG = "MediaPlayerOpt";
 
-static const char* TAG = "MediaPlayer";
+// -------------------------
+// LVGL filesystem driver
+// Maps LVGL drive letters to actual mountpoints and normalizes paths.
+// 'A:' -> /sdcard/
+// 'S:' -> /spiffs/
+// If LVGL passes an absolute path (starts with '/'), we use it as-is.
 
-// MP3 playback task
-static TaskHandle_t s_mp3_task = NULL;
-static bool s_mp3_playing = false;
-
-// MP3 playback using minimp3 decoder
-static void mp3_play_task(void* pv)
+static void normalize_lvgl_path(const char* lv_path, char* out, size_t out_sz)
 {
-    const char* filepath = (const char*)pv;
-    ESP_LOGI(TAG, "MP3 playback started: %s", filepath);
-    
-    FILE* f = fopen(filepath, "rb");
-    if (!f) {
-        ESP_LOGE(TAG, "Failed to open MP3 file: %s", filepath);
-        free((void*)filepath);
-        s_mp3_playing = false;
-        s_mp3_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    // Initialize audio
-    if (audio_alert_init() != ESP_OK) {
-        ESP_LOGE(TAG, "Audio init failed");
-        fclose(f);
-        free((void*)filepath);
-        s_mp3_playing = false;
-        s_mp3_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    // Get speaker handle from audio_alert (it manages the speaker)
-    // We'll use the audio_alert's speaker handle
-    extern esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void);
-    esp_codec_dev_handle_t spk = bsp_audio_codec_speaker_init();
-    if (!spk) {
-        ESP_LOGE(TAG, "Speaker init failed");
-        fclose(f);
-        free((void*)filepath);
-        s_mp3_playing = false;
-        s_mp3_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    // Ensure audio is initialized
-    audio_alert_init();
-    
-    // Read file in chunks and decode MP3
-    // For now, use a simple approach: read and decode frame by frame
-    // Note: This is a simplified implementation. For full MP3 support, 
-    // minimp3 library needs to be properly integrated.
-    
-    // Simple file-based MP3 playback using frame-by-frame decoding
-    // We'll use the basic minimp3 API if available, otherwise fall back to file streaming
-    uint8_t* mp3_buf = malloc(4096);
-    int16_t* pcm_buf = malloc(1152 * 2 * sizeof(int16_t)); // Max samples per frame * channels
-    
-    if (!mp3_buf || !pcm_buf) {
-        ESP_LOGE(TAG, "Memory allocation failed");
-        if (mp3_buf) free(mp3_buf);
-        if (pcm_buf) free(pcm_buf);
-        fclose(f);
-        free((void*)filepath);
-        s_mp3_playing = false;
-        s_mp3_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    // Initialize MP3 decoder
-    mp3dec_t mp3d;
-    mp3dec_init(&mp3d);
-    mp3dec_frame_info_t info;
-    
-    // Configure audio codec - we'll get sample rate/channels from first frame
-    esp_codec_dev_sample_info_t fs = {0};
-    bool audio_opened = false;
-    int vol = (int)settings_get_notify_volume();
-    if (vol < 0) vol = 0;
-    if (vol > 100) vol = 100;
-    
-    // Read and decode MP3 frames in a loop
-    size_t mp3_buf_size = 4096;
-    size_t mp3_buf_pos = 0;
-    
-    while (s_mp3_playing) {
-        // Read more data if buffer is low
-        if (mp3_buf_pos + 1440 > mp3_buf_size) {
-            // Move remaining data to start
-            size_t remaining = mp3_buf_size - mp3_buf_pos;
-            if (remaining > 0 && remaining < mp3_buf_size) {
-                memmove(mp3_buf, mp3_buf + mp3_buf_pos, remaining);
-            }
-            mp3_buf_pos = 0;
-            mp3_buf_size = remaining;
-            
-            // Read more data
-            size_t to_read = 4096 - mp3_buf_size;
-            size_t n = fread(mp3_buf + mp3_buf_size, 1, to_read, f);
-            if (n == 0) {
-                // End of file
-                break;
-            }
-            mp3_buf_size += n;
-        }
-        
-        // Decode one frame
-        int samples = mp3dec_decode_frame(&mp3d, mp3_buf + mp3_buf_pos, 
-                                         mp3_buf_size - mp3_buf_pos, pcm_buf, &info);
-        
-        if (samples > 0 && info.frame_bytes > 0) {
-            // Update buffer position
-            mp3_buf_pos += info.frame_bytes;
-            
-            // Configure audio on first frame
-            if (!audio_opened) {
-                fs.sample_rate = info.hz;
-                fs.channel = info.channels;
-                fs.bits_per_sample = 16;
-                
-                if (esp_codec_dev_open(spk, &fs) != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to open audio codec");
-                    break;
-                }
-                esp_codec_dev_set_out_vol(spk, vol);
-                esp_codec_dev_set_out_mute(spk, false);
-                audio_opened = true;
-                ESP_LOGI(TAG, "Audio opened: %d Hz, %d channels", info.hz, info.channels);
-            }
-            
-            // Write PCM data to audio output
-            size_t pcm_samples = samples * info.channels;
-            size_t written = 0;
-            while (written < pcm_samples && s_mp3_playing) {
-                size_t to_write = pcm_samples - written;
-                if (to_write > 256) to_write = 256;
-                
-                if (esp_codec_dev_write(spk, pcm_buf + written, 
-                                        to_write * sizeof(int16_t)) != ESP_OK) {
-                    ESP_LOGW(TAG, "Audio write failed");
-                    break;
-                }
-                written += to_write;
-            }
-        } else if (info.frame_bytes > 0) {
-            // Skip invalid frame
-            mp3_buf_pos += info.frame_bytes;
+    if (!lv_path || !out) return;
+    out[0] = '\0';
+
+    // If LVGL supplies drive letter like "A:foo" or "A:/foo"
+    if (strlen(lv_path) >= 2 && lv_path[1] == ':') {
+        char drive = lv_path[0];
+        const char* rest = lv_path + 2;
+        if (*rest == '/') rest++; // skip optional slash
+        if (drive == 'A') {
+            snprintf(out, out_sz, "/sdcard/%s", rest);
+        } else if (drive == 'S') {
+            snprintf(out, out_sz, "/spiffs/%s", rest);
         } else {
-            // Need more data or end of stream
-            if (mp3_buf_pos >= mp3_buf_size) {
-                // No more data available
-                break;
-            }
-            // Try to find next sync word by skipping a byte
-            mp3_buf_pos++;
+            // Unknown drive -> pass remainder
+            snprintf(out, out_sz, "%s", rest);
         }
+        return;
     }
-    
-    // Cleanup
-    if (audio_opened) {
-        esp_codec_dev_set_out_mute(spk, true);
-        vTaskDelay(pdMS_TO_TICKS(100)); // Let audio drain
-        esp_codec_dev_close(spk);
+
+    // Absolute unix path
+    if (lv_path[0] == '/') {
+        strncpy(out, lv_path, out_sz - 1);
+        out[out_sz - 1] = '\0';
+        return;
     }
-    
-    free(mp3_buf);
-    free(pcm_buf);
-    fclose(f);
-    free((void*)filepath);
-    
-    ESP_LOGI(TAG, "MP3 playback finished");
-    s_mp3_playing = false;
-    s_mp3_task = NULL;
-    vTaskDelete(NULL);
+
+    // Fallback: assume sdcard
+    snprintf(out, out_sz, "/sdcard/%s", lv_path);
 }
 
-esp_err_t media_player_play_mp3(const char* filepath)
+static void* fs_open_cb(lv_fs_drv_t* drv, const char* path, lv_fs_mode_t mode)
 {
-    if (!filepath) return ESP_ERR_INVALID_ARG;
-    
-    // Stop any currently playing file
-    if (s_mp3_playing && s_mp3_task) {
-        s_mp3_playing = false;
-        vTaskDelay(pdMS_TO_TICKS(100));
+    const char* flags = "rb";
+    if (mode == LV_FS_MODE_WR) flags = "wb";
+    else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "r+b";
+
+    char actual[256];
+    normalize_lvgl_path(path, actual, sizeof(actual));
+    FILE* f = fopen(actual, flags);
+    ESP_LOGI(TAG, "fs_open: LVGL->'%s' -> '%s' -> %p", path, actual, f);
+    return (void*)f;
+}
+
+static lv_fs_res_t fs_close_cb(lv_fs_drv_t* drv, void* file_p)
+{
+    FILE* f = (FILE*)file_p;
+    if (f) {
+        fclose(f);
+        ESP_LOGI(TAG, "fs_close: %p", f);
     }
-    
-    // Check if file exists
-    struct stat st;
-    if (stat(filepath, &st) != 0) {
-        ESP_LOGE(TAG, "File not found: %s", filepath);
-        return ESP_ERR_NOT_FOUND;
-    }
-    
-    char* path_copy = strdup(filepath);
-    if (!path_copy) return ESP_ERR_NO_MEM;
-    
-    s_mp3_playing = true;
-    // Increased stack size for MP3 decoding - minimp3 needs significant stack space
-    // mp3dec_t structure is ~6KB, plus function call stack and local variables
-    xTaskCreate(mp3_play_task, "mp3_play", 24576, path_copy, 5, &s_mp3_task);
-    
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_read_cb(lv_fs_drv_t* drv, void* file_p, void* buf, uint32_t btr, uint32_t* br)
+{
+    FILE* f = (FILE*)file_p;
+    if (!f) { *br = 0; return LV_FS_RES_UNKNOWN; }
+    size_t r = fread(buf, 1, btr, f);
+    *br = (uint32_t)r;
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_seek_cb(lv_fs_drv_t* drv, void* file_p, uint32_t pos, lv_fs_whence_t whence)
+{
+    FILE* f = (FILE*)file_p;
+    if (!f) return LV_FS_RES_UNKNOWN;
+    int w = SEEK_SET;
+    if (whence == LV_FS_SEEK_CUR) w = SEEK_CUR;
+    else if (whence == LV_FS_SEEK_END) w = SEEK_END;
+    return (fseek(f, pos, w) == 0) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t fs_tell_cb(lv_fs_drv_t* drv, void* file_p, uint32_t* pos_p)
+{
+    FILE* f = (FILE*)file_p;
+    if (!f) return LV_FS_RES_UNKNOWN;
+    long p = ftell(f);
+    if (p < 0) return LV_FS_RES_UNKNOWN;
+    *pos_p = (uint32_t)p;
+    return LV_FS_RES_OK;
+}
+
+esp_err_t media_player_init_lvgl_fs(void)
+{
+    static lv_fs_drv_t fs_drv;
+    lv_fs_drv_init(&fs_drv);
+    fs_drv.letter = 'A'; // map 'A:' to sdcard
+    fs_drv.open_cb = fs_open_cb;
+    fs_drv.close_cb = fs_close_cb;
+    fs_drv.read_cb = fs_read_cb;
+    fs_drv.seek_cb = fs_seek_cb;
+    fs_drv.tell_cb = fs_tell_cb;
+    lv_fs_drv_register(&fs_drv);
+    ESP_LOGI(TAG, "LVGL filesystem driver 'A' registered (maps to /sdcard/)");
+
+    // Also register 'S' for spiffs if you want to keep supporting it
+    static lv_fs_drv_t spiffs_drv;
+    lv_fs_drv_init(&spiffs_drv);
+    spiffs_drv.letter = 'S';
+    spiffs_drv.open_cb = fs_open_cb;
+    spiffs_drv.close_cb = fs_close_cb;
+    spiffs_drv.read_cb = fs_read_cb;
+    spiffs_drv.seek_cb = fs_seek_cb;
+    spiffs_drv.tell_cb = fs_tell_cb;
+    lv_fs_drv_register(&spiffs_drv);
+    ESP_LOGI(TAG, "LVGL filesystem driver 'S' registered (maps to /spiffs/)");
+
     return ESP_OK;
 }
 
-// Image viewer screen
-static lv_obj_t* s_image_viewer = NULL;
+// -------------------------
+// Fast raw RGB565 loader (instant blit)
+// Raw file format expected: width*height*2 bytes (RGB565 little endian)
+// No header. Caller must know width/height.
+// The routine allocates an lv_img_dsc_t with PSRAM and returns it; free with lv_mem_free() or free().
 
-static void image_viewer_close_cb(lv_event_t* e)
+lv_image_dsc_t *load_raw_rgb565_image(const char *path, uint32_t width, uint32_t height)
 {
-    if (s_image_viewer) {
-        lv_obj_del(s_image_viewer);
-        s_image_viewer = NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        ESP_LOGE("MediaPlayer", "Failed to open raw file: %s", path);
+        return NULL;
     }
+
+    uint32_t size = width * height * 2; // RGB565 = 2 bytes per pixel
+
+    lv_image_dsc_t *dsc = malloc(sizeof(lv_image_dsc_t));
+    if (!dsc) {
+        fclose(f);
+        ESP_LOGE("MediaPlayer", "Failed to alloc lv_image_dsc_t");
+        return NULL;
+    }
+
+    void *buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        fclose(f);
+        free(dsc);
+        ESP_LOGE("MediaPlayer", "Failed to alloc image buffer (%ld bytes)", size);
+        return NULL;
+    }
+
+    fread(buf, 1, size, f);
+    fclose(f);
+
+    // LVGL 9 IMAGE HEADER
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;    // LVGL 9 color format
+    dsc->header.flags = 0;
+    dsc->header.w = width;
+    dsc->header.h = height;
+
+    dsc->data_size = size;
+    dsc->data = buf;
+
+    return dsc;
 }
 
-void media_viewer_show_image(const char* filepath)
+
+// -------------------------
+// New image viewer that prefers raw RGB565 or direct SD JPG path
+
+static lv_obj_t* s_image_viewer = NULL;
+static lv_img_dsc_t* s_raw_dsc = NULL; // if we loaded a raw image
+static char* s_current_filepath = NULL;
+
+void media_viewer_close_fast(void)
 {
-    if (!filepath) return;
-    
-    // Close existing viewer if open
     if (s_image_viewer) {
         lv_obj_del(s_image_viewer);
         s_image_viewer = NULL;
     }
-    
-    // Get a valid parent - use active screen if layer_top is not available
+    if (s_raw_dsc) {
+        free(s_raw_dsc);
+        s_raw_dsc = NULL;
+    }
+    if (s_current_filepath) { free(s_current_filepath); s_current_filepath = NULL; }
+}
+
+void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t raw_h)
+{
+    if (!filepath) return;
+
+    // Close previous
+    media_viewer_close_fast();
+
     lv_obj_t* parent = lv_layer_top();
-    if (!parent) {
-        parent = lv_scr_act();
-    }
-    if (!parent) {
-        ESP_LOGE(TAG, "No valid parent for image viewer");
-        return;
-    }
-    
-    // Create full-screen image viewer
+    if (!parent) parent = lv_scr_act();
+
     s_image_viewer = lv_obj_create(parent);
-    if (!s_image_viewer) {
-        ESP_LOGE(TAG, "Failed to create image viewer");
-        return;
-    }
-    
     lv_obj_remove_style_all(s_image_viewer);
     lv_obj_set_size(s_image_viewer, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(s_image_viewer, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_image_viewer, LV_OPA_COVER, 0);
-    
-    // Try to load image using LVGL file system
-    char lvgl_path[256];
-    if (strncmp(filepath, "/sdcard/", 8) == 0) {
-        // SD card file - LVGL can't directly access without SD card driver
-        // Show informative message
-        lv_obj_t* msg = lv_label_create(s_image_viewer);
-        if (msg) {
-            lv_label_set_text(msg, "SD card image\n(Requires SD card\nLVGL driver)");
-            lv_obj_center(msg);
-            lv_obj_set_style_text_color(msg, lv_color_white(), 0);
-            lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
+
+    // Determine extension
+    const char* ext = strrchr(filepath, '.');
+    char lv_path[256];
+
+    // If user provided a .raw/.rgb565 and supplied dimensions, load as raw
+    if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0) && raw_w > 0 && raw_h > 0) {
+        ESP_LOGI(TAG, "Loading raw RGB565 image %s (%dx%d)", filepath, raw_w, raw_h);
+        // raw files are absolute paths on the filesystem; allow both sdcard and spiffs
+        char actual[256];
+        if (filepath[0] == '/') strncpy(actual, filepath, sizeof(actual)-1);
+        else snprintf(actual, sizeof(actual), "/sdcard/%s", filepath);
+
+        s_raw_dsc = load_raw_rgb565_image(actual, raw_w, raw_h);
+        if (!s_raw_dsc) {
+            lv_obj_t* lbl = lv_label_create(s_image_viewer);
+            lv_label_set_text(lbl, "Failed to load RAW image");
+            lv_obj_center(lbl);
+            return;
         }
-        ESP_LOGW(TAG, "SD card image viewing requires LVGL SD card driver setup: %s", filepath);
-    } else if (strncmp(filepath, "/spiffs/", 8) == 0) {
-        snprintf(lvgl_path, sizeof(lvgl_path), "S:%s", filepath + 8);
-        lv_obj_t* img = lv_image_create(s_image_viewer);
-        if (img) {
-            lv_image_set_src(img, lvgl_path);
-            lv_obj_center(img);
+
+        lv_obj_t* img = lv_img_create(s_image_viewer);
+        lv_img_set_src(img, s_raw_dsc);
+        lv_obj_center(img);
+        ESP_LOGI(TAG, "Raw image shown instantaneously");
+    } else if (ext && (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0)) {
+        // Use direct SD card path via LVGL driver 'A:' which maps to /sdcard/
+        // If filepath already absolute (/sdcard/...), convert to A: format
+        if (strncmp(filepath, "/sdcard/", 8) == 0) {
+            snprintf(lv_path, sizeof(lv_path), "A:%s", filepath + 8);
+        } else {
+            // assume given path is relative to sdcard
+            snprintf(lv_path, sizeof(lv_path), "A:%s", filepath);
         }
+        ESP_LOGI(TAG, "Loading JPG via LVGL path %s", lv_path);
+        lv_obj_t* img = lv_img_create(s_image_viewer);
+        lv_img_set_src(img, lv_path); // LVGL's TJpgd decoder will handle file reads (faster than SPIFFS PNG)
+        lv_obj_center(img);
+    } else if (ext && (strcasecmp(ext, ".png") == 0)) {
+        // PNG decoding is slow on SD + SPIFFS. We will still load PNG directly from sdcard if asked,
+        // but recommend converting to JPG or raw for speed.
+        if (strncmp(filepath, "/sdcard/", 8) == 0) {
+            snprintf(lv_path, sizeof(lv_path), "A:%s", filepath + 8);
+        } else {
+            snprintf(lv_path, sizeof(lv_path), "A:%s", filepath);
+        }
+        ESP_LOGI(TAG, "Loading PNG via LVGL path %s (may be slow)", lv_path);
+        lv_obj_t* img = lv_img_create(s_image_viewer);
+        lv_img_set_src(img, lv_path);
+        lv_obj_center(img);
     } else {
-        lv_obj_t* msg = lv_label_create(s_image_viewer);
-        if (msg) {
-            lv_label_set_text(msg, "Invalid image path");
-            lv_obj_center(msg);
-            lv_obj_set_style_text_color(msg, lv_color_white(), 0);
-        }
+        // Unknown extension: attempt to load as absolute path
+        ESP_LOGI(TAG, "Attempt loading as absolute path: %s", filepath);
+        lv_obj_t* img = lv_img_create(s_image_viewer);
+        lv_img_set_src(img, filepath);
+        lv_obj_center(img);
     }
-    
-    // Add close button
-    lv_obj_t* btn_close = lv_btn_create(s_image_viewer);
-    if (btn_close) {
-        lv_obj_set_pos(btn_close, 10, 10);
-        lv_obj_t* lbl_close = lv_label_create(btn_close);
-        if (lbl_close) {
-            lv_label_set_text(lbl_close, "X");
-        }
-        lv_obj_add_event_cb(btn_close, image_viewer_close_cb, LV_EVENT_CLICKED, NULL);
-    }
-    if (s_image_viewer) {
-        lv_obj_add_event_cb(s_image_viewer, image_viewer_close_cb, LV_EVENT_GESTURE, NULL);
-    }
+
+    // store current filepath
+    s_current_filepath = strdup(filepath);
+
+    // Add a hint label
+    lv_obj_t* hint = lv_label_create(s_image_viewer);
+    lv_label_set_text(hint, "Swipe down or right to close");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_style_text_color(hint, lv_color_white(), 0);
+    lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);
 }
 
-// Watchface background changer
-esp_err_t watchface_set_background_from_file(const char* filepath)
+// -------------------------
+// Watchface set function: prefer direct SD JPG or raw descriptor
+
+esp_err_t watchface_set_background_from_file_fast(const char* filepath, uint16_t raw_w, uint16_t raw_h)
 {
     if (!filepath) return ESP_ERR_INVALID_ARG;
-    
-    ESP_LOGI(TAG, "Setting watchface background from: %s", filepath);
-    
-    // Get watchface screen and background image
+    ESP_LOGI(TAG, "Set watchface background from: %s", filepath);
+
     extern lv_obj_t* watchface_screen_get(void);
     lv_obj_t* wf = watchface_screen_get();
-    if (!wf) {
-        ESP_LOGE(TAG, "Watchface screen not available");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    // Find background image object (it's the first image child)
+    if (!wf) return ESP_ERR_INVALID_STATE;
+
+    // find first image child
     lv_obj_t* bg_img = NULL;
     uint32_t child_cnt = lv_obj_get_child_cnt(wf);
     for (uint32_t i = 0; i < child_cnt; i++) {
         lv_obj_t* child = lv_obj_get_child(wf, i);
-        if (lv_obj_check_type(child, &lv_image_class)) {
-            bg_img = child;
-            break;
-        }
+        if (lv_obj_check_type(child, &lv_image_class)) { bg_img = child; break; }
     }
-    
-    if (!bg_img) {
-        ESP_LOGE(TAG, "Background image not found in watchface");
-        return ESP_ERR_NOT_FOUND;
-    }
-    
-    // Try to set image source from file
-    // For SPIFFS files, use LVGL file system path
-    char lvgl_path[256];
-    if (strncmp(filepath, "/spiffs/", 8) == 0) {
-        snprintf(lvgl_path, sizeof(lvgl_path), "S:%s", filepath + 8);
-        lv_image_set_src(bg_img, lvgl_path);
-        ESP_LOGI(TAG, "Watchface background set to: %s", lvgl_path);
+    if (!bg_img) return ESP_ERR_NOT_FOUND;
+
+    const char* ext = strrchr(filepath, '.');
+    char lv_path[256];
+
+    if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0) && raw_w > 0 && raw_h > 0) {
+        // load raw and set src from memory
+        lv_img_dsc_t* dsc = load_raw_rgb565_image(filepath, raw_w, raw_h);
+        if (!dsc) return ESP_FAIL;
+        lv_img_set_src(bg_img, dsc);
+        // keep dsc allocated as long as watchface uses it; the caller can manage persistence
+        // user is responsible for freeing previous background buffer if needed
+        ESP_LOGI(TAG, "Watchface raw background set (fast)");
         return ESP_OK;
-    } else if (strncmp(filepath, "/sdcard/", 8) == 0) {
-        // SD card files need special handling - copy to SPIFFS or use SD card driver
-        ESP_LOGW(TAG, "SD card watchface backgrounds require SD card LVGL driver");
-        return ESP_ERR_NOT_SUPPORTED;
-    } else {
-        ESP_LOGE(TAG, "Invalid file path: %s", filepath);
-        return ESP_ERR_INVALID_ARG;
     }
+
+    if (strncmp(filepath, "/sdcard/", 8) == 0) snprintf(lv_path, sizeof(lv_path), "A:%s", filepath + 8);
+    else snprintf(lv_path, sizeof(lv_path), "A:%s", filepath);
+
+    lv_img_set_src(bg_img, lv_path);
+    lv_obj_invalidate(bg_img);
+    lv_refr_now(NULL);
+    ESP_LOGI(TAG, "Watchface background set to %s", lv_path);
+    return ESP_OK;
 }
+
+esp_err_t watchface_set_background_from_file(const char *path)
+{
+    if (!path) {
+        return ESP_FAIL;
+    }
+
+    // This loads the image instantly if RAW/JPG, slower if PNG
+    media_viewer_show_image_fast(path, 0, 0);
+
+    return ESP_OK;
+}
+// Legacy API compatibility — keeps older code working
+// Legacy API wrapper — matches header type
+void media_viewer_show_image(const char *filepath)
+{
+    if (!filepath) return;
+
+    // Call the new fast image loader
+    media_viewer_show_image_fast(filepath, 0, 0);
+}
+
 
