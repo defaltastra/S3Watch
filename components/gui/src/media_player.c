@@ -151,34 +151,61 @@ lv_image_dsc_t *load_raw_rgb565_image(const char *path, uint32_t width, uint32_t
         return NULL;
     }
 
-    uint32_t size = width * height * 2; // RGB565 = 2 bytes per pixel
+    // Get file size to verify
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    uint32_t expected_size = width * height * 2;
+    ESP_LOGI("MediaPlayer", "File size: %ld, Expected: %ld", file_size, expected_size);
 
-    lv_image_dsc_t *dsc = malloc(sizeof(lv_image_dsc_t));
+    lv_image_dsc_t *dsc = heap_caps_malloc(sizeof(lv_image_dsc_t), MALLOC_CAP_8BIT);
     if (!dsc) {
         fclose(f);
         ESP_LOGE("MediaPlayer", "Failed to alloc lv_image_dsc_t");
         return NULL;
     }
 
-    void *buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    void *buf = heap_caps_malloc(expected_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
         fclose(f);
         free(dsc);
-        ESP_LOGE("MediaPlayer", "Failed to alloc image buffer (%ld bytes)", size);
+        ESP_LOGE("MediaPlayer", "Failed to alloc image buffer (%ld bytes)", expected_size);
         return NULL;
     }
 
-    fread(buf, 1, size, f);
+    size_t bytes_read = fread(buf, 1, expected_size, f);
     fclose(f);
+    
+    ESP_LOGI("MediaPlayer", "Read %zu bytes (expected %ld)", bytes_read, expected_size);
+    
+    // Debug: Check first few pixels
+    uint16_t *pixels = (uint16_t*)buf;
+    ESP_LOGI("MediaPlayer", "First 4 pixels: %04X %04X %04X %04X", 
+             pixels[0], pixels[1], pixels[2], pixels[3]);
+    
+    // Check if all pixels are black (0x0000)
+    bool all_black = true;
+    for (int i = 0; i < 100 && i < width * height; i++) {
+        if (pixels[i] != 0x0000) {
+            all_black = false;
+            break;
+        }
+    }
+    if (all_black) {
+        ESP_LOGW("MediaPlayer", "WARNING: First 100 pixels are all black!");
+    }
 
-    // LVGL 9 IMAGE HEADER
+    // LVGL 9 IMAGE HEADER - use proper initialization
+    memset(dsc, 0, sizeof(lv_image_dsc_t));
     dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
-    dsc->header.cf = LV_COLOR_FORMAT_RGB565;    // LVGL 9 color format
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
     dsc->header.flags = 0;
     dsc->header.w = width;
     dsc->header.h = height;
+    dsc->header.stride = width * 2; 
 
-    dsc->data_size = size;
+    dsc->data_size = expected_size;
     dsc->data = buf;
 
     return dsc;

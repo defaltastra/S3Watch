@@ -40,17 +40,20 @@ static void screen_events(lv_event_t* e)
 #include "media_player.h"
 
 // Check if file is an image by extension
-static bool is_image_file(const char* filename)
+bool is_image_file(const char *name)
 {
-    if (!filename) return false;
-    const char* ext = strrchr(filename, '.');
+    const char *ext = strrchr(name, '.');
     if (!ext) return false;
-    ext++; // Skip the dot
-    return (strcasecmp(ext, "jpg") == 0 || strcasecmp(ext, "jpeg") == 0 ||
-            strcasecmp(ext, "png") == 0 || strcasecmp(ext, "bmp") == 0 ||
-            strcasecmp(ext, "gif") == 0 ||
-            strcasecmp(ext, "raw") == 0 ||
-            strcasecmp(ext, "rgb565") == 0);
+
+    if (strcasecmp(ext, ".jpg") == 0) return true;
+    if (strcasecmp(ext, ".jpeg") == 0) return true;
+    if (strcasecmp(ext, ".png") == 0) return true;
+
+    // Add support for raw formats
+    if (strcasecmp(ext, ".raw") == 0) return true;
+    if (strcasecmp(ext, ".rgb565") == 0) return true;
+
+    return false;
 }
 
 
@@ -71,23 +74,28 @@ static void file_click_cb(lv_event_t* e)
     
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED) {
-        // Single click - view image
         ESP_LOGI(TAG, "Viewing image: %s", filepath);
-        media_viewer_show_image(filepath);
-    } else if (code == LV_EVENT_LONG_PRESSED) {
-        // Long press - set as watchface
-        ESP_LOGI(TAG, "Setting watchface: %s", filepath);
-        if (watchface_set_background_from_file(filepath) == ESP_OK) {
-            ESP_LOGI(TAG, "Watchface background set successfully");
+        
+        // Check if RAW file and provide dimensions
+        const char* ext = strrchr(filepath, '.');
+        if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0)) {
+            // Use your watch's screen dimensions (410x502 based on your logs)
+            media_viewer_show_image_fast(filepath, 410, 502);
         } else {
-            ESP_LOGW(TAG, "Failed to set watchface background");
+            media_viewer_show_image(filepath);
+        }
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        ESP_LOGI(TAG, "Setting watchface: %s", filepath);
+        
+        // Same for watchface
+        const char* ext = strrchr(filepath, '.');
+        if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0)) {
+            watchface_set_background_from_file_fast(filepath, 410, 502);
+        } else {
+            watchface_set_background_from_file(filepath);
         }
     }
-    ESP_LOGI(TAG, "Button clicked, path = %s", filepath);
-media_viewer_show_image(filepath);
-
 }
-
 // Add files from a directory to the list
 static void add_files_from_dir(lv_obj_t* list, const char* dir_path, const char* prefix)
 {
