@@ -25,6 +25,7 @@ static const char* TAG = "MediaPlayerOpt";
 // 'S:' -> /spiffs/
 // If LVGL passes an absolute path (starts with '/'), we use it as-is.
 
+
 static void normalize_lvgl_path(const char* lv_path, char* out, size_t out_sz)
 {
     if (!lv_path || !out) return;
@@ -113,7 +114,7 @@ esp_err_t media_player_init_lvgl_fs(void)
 {
     static lv_fs_drv_t fs_drv;
     lv_fs_drv_init(&fs_drv);
-    fs_drv.letter = 'A'; // map 'A:' to sdcard
+    fs_drv.letter = 'A';
     fs_drv.open_cb = fs_open_cb;
     fs_drv.close_cb = fs_close_cb;
     fs_drv.read_cb = fs_read_cb;
@@ -122,7 +123,6 @@ esp_err_t media_player_init_lvgl_fs(void)
     lv_fs_drv_register(&fs_drv);
     ESP_LOGI(TAG, "LVGL filesystem driver 'A' registered (maps to /sdcard/)");
 
-    // Also register 'S' for spiffs if you want to keep supporting it
     static lv_fs_drv_t spiffs_drv;
     lv_fs_drv_init(&spiffs_drv);
     spiffs_drv.letter = 'S';
@@ -216,9 +216,11 @@ lv_image_dsc_t *load_raw_rgb565_image(const char *path, uint32_t width, uint32_t
 // New image viewer that prefers raw RGB565 or direct SD JPG path
 
 static lv_obj_t* s_image_viewer = NULL;
-static lv_img_dsc_t* s_raw_dsc = NULL; // if we loaded a raw image
+static lv_img_dsc_t* s_raw_dsc = NULL; 
 static char* s_current_filepath = NULL;
-
+static void image_viewer_event_cb(lv_event_t* e);
+static void set_watchface_btn_cb(lv_event_t* e);
+// Update the close function to properly free memory
 void media_viewer_close_fast(void)
 {
     if (s_image_viewer) {
@@ -226,10 +228,94 @@ void media_viewer_close_fast(void)
         s_image_viewer = NULL;
     }
     if (s_raw_dsc) {
+        if (s_raw_dsc->data) {
+            free((void*)s_raw_dsc->data);
+        }
         free(s_raw_dsc);
         s_raw_dsc = NULL;
     }
-    if (s_current_filepath) { free(s_current_filepath); s_current_filepath = NULL; }
+    if (s_current_filepath) { 
+        free(s_current_filepath); 
+        s_current_filepath = NULL; 
+    }
+    ESP_LOGI(TAG, "Image viewer closed and resources freed");
+}
+
+
+// Add gesture handler for the image viewer
+static void image_viewer_event_cb(lv_event_t* e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    
+    if (code == LV_EVENT_GESTURE) {
+        lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+        if (dir == LV_DIR_BOTTOM || dir == LV_DIR_RIGHT) {
+            ESP_LOGI(TAG, "Closing image viewer (swipe detected)");
+            lv_indev_wait_release(lv_indev_active());
+            media_viewer_close_fast();
+        }
+    } else if (code == LV_EVENT_CLICKED) {
+        // Single tap also closes
+        ESP_LOGI(TAG, "Closing image viewer (tap detected)");
+        media_viewer_close_fast();
+    }
+}
+
+static void set_watchface_btn_cb(lv_event_t* e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    
+    if (!s_current_filepath) {
+        ESP_LOGW(TAG, "No current filepath to set as watchface");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Setting watchface to: %s", s_current_filepath);
+    
+    // Determine if it's a raw file and get dimensions from the current image
+    const char* ext = strrchr(s_current_filepath, '.');
+    uint16_t w = 0, h = 0;
+    
+    if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0)) {
+        // For raw files, we need dimensions - check if we have a loaded descriptor
+        if (s_raw_dsc) {
+            w = s_raw_dsc->header.w;
+            h = s_raw_dsc->header.h;
+            watchface_set_background_from_file_fast(s_current_filepath, w, h);
+            // IMPORTANT: Save dimensions for RAW files
+            settings_set_wallpaper_dimensions(w, h);
+        } else {
+            // Fallback to default dimensions
+            w = 410;
+            h = 502;
+            watchface_set_background_from_file_fast(s_current_filepath, w, h);
+            settings_set_wallpaper_dimensions(w, h);
+        }
+    } else {
+        watchface_set_background_from_file_fast(s_current_filepath, 0, 0);
+    }
+    
+    // CRITICAL: Save wallpaper path to NVS
+    esp_err_t err = settings_set_wallpaper(s_current_filepath);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save wallpaper to NVS: %s", esp_err_to_name(err));
+    }
+    
+    // Show confirmation toast
+    lv_obj_t* viewer = s_image_viewer;
+    if (viewer) {
+        lv_obj_t* toast = lv_label_create(viewer);
+        lv_label_set_text(toast, err == ESP_OK ? "Watchface Saved!" : "Save Failed!");
+        lv_obj_align(toast, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_text_color(toast, lv_color_white(), 0);
+        lv_obj_set_style_bg_color(toast, err == ESP_OK ? lv_color_make(0, 150, 0) : lv_color_make(150, 0, 0), 0);
+        lv_obj_set_style_bg_opa(toast, LV_OPA_80, 0);
+        lv_obj_set_style_pad_all(toast, 10, 0);
+        lv_obj_set_style_radius(toast, 5, 0);
+        
+        // Auto-delete toast after 2 seconds
+        lv_obj_delete_delayed(toast, 2000);
+    }
 }
 
 void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t raw_h)
@@ -247,15 +333,19 @@ void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t
     lv_obj_set_size(s_image_viewer, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(s_image_viewer, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_image_viewer, LV_OPA_COVER, 0);
+    
+    // Add event handlers for closing
+    lv_obj_add_event_cb(s_image_viewer, image_viewer_event_cb, LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(s_image_viewer, image_viewer_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(s_image_viewer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_image_viewer, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
-    // Determine extension
+    // [Keep all your existing image loading code here - the part with raw/jpg/png detection]
     const char* ext = strrchr(filepath, '.');
     char lv_path[256];
 
-    // If user provided a .raw/.rgb565 and supplied dimensions, load as raw
     if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0) && raw_w > 0 && raw_h > 0) {
         ESP_LOGI(TAG, "Loading raw RGB565 image %s (%dx%d)", filepath, raw_w, raw_h);
-        // raw files are absolute paths on the filesystem; allow both sdcard and spiffs
         char actual[256];
         if (filepath[0] == '/') strncpy(actual, filepath, sizeof(actual)-1);
         else snprintf(actual, sizeof(actual), "/sdcard/%s", filepath);
@@ -273,21 +363,16 @@ void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t
         lv_obj_center(img);
         ESP_LOGI(TAG, "Raw image shown instantaneously");
     } else if (ext && (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0)) {
-        // Use direct SD card path via LVGL driver 'A:' which maps to /sdcard/
-        // If filepath already absolute (/sdcard/...), convert to A: format
         if (strncmp(filepath, "/sdcard/", 8) == 0) {
             snprintf(lv_path, sizeof(lv_path), "A:%s", filepath + 8);
         } else {
-            // assume given path is relative to sdcard
             snprintf(lv_path, sizeof(lv_path), "A:%s", filepath);
         }
         ESP_LOGI(TAG, "Loading JPG via LVGL path %s", lv_path);
         lv_obj_t* img = lv_img_create(s_image_viewer);
-        lv_img_set_src(img, lv_path); // LVGL's TJpgd decoder will handle file reads (faster than SPIFFS PNG)
+        lv_img_set_src(img, lv_path);
         lv_obj_center(img);
     } else if (ext && (strcasecmp(ext, ".png") == 0)) {
-        // PNG decoding is slow on SD + SPIFFS. We will still load PNG directly from sdcard if asked,
-        // but recommend converting to JPG or raw for speed.
         if (strncmp(filepath, "/sdcard/", 8) == 0) {
             snprintf(lv_path, sizeof(lv_path), "A:%s", filepath + 8);
         } else {
@@ -298,7 +383,6 @@ void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t
         lv_img_set_src(img, lv_path);
         lv_obj_center(img);
     } else {
-        // Unknown extension: attempt to load as absolute path
         ESP_LOGI(TAG, "Attempt loading as absolute path: %s", filepath);
         lv_obj_t* img = lv_img_create(s_image_viewer);
         lv_img_set_src(img, filepath);
@@ -308,12 +392,34 @@ void media_viewer_show_image_fast(const char* filepath, uint16_t raw_w, uint16_t
     // store current filepath
     s_current_filepath = strdup(filepath);
 
-    // Add a hint label
-    lv_obj_t* hint = lv_label_create(s_image_viewer);
-    lv_label_set_text(hint, "Swipe down or right to close");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+    // Add bottom control panel with hint and button
+    lv_obj_t* bottom_panel = lv_obj_create(s_image_viewer);
+    lv_obj_remove_style_all(bottom_panel);
+    lv_obj_set_size(bottom_panel, lv_pct(100), 80);
+    lv_obj_align(bottom_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(bottom_panel, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(bottom_panel, LV_OPA_70, 0);
+    lv_obj_set_flex_flow(bottom_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(bottom_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(bottom_panel, 10, 0);
+    lv_obj_clear_flag(bottom_panel, LV_OBJ_FLAG_CLICKABLE);  // Don't intercept gestures
+
+    // Hint label
+    lv_obj_t* hint = lv_label_create(bottom_panel);
+    lv_label_set_text(hint, "Tap or swipe to close");
     lv_obj_set_style_text_color(hint, lv_color_white(), 0);
-    lv_obj_set_style_text_opa(hint, LV_OPA_70, 0);
+    lv_obj_set_style_text_opa(hint, LV_OPA_80, 0);
+
+    // Set as Watchface button
+    lv_obj_t* btn = lv_btn_create(bottom_panel);
+    lv_obj_set_size(btn, 200, 40);
+    lv_obj_set_style_bg_color(btn, lv_color_make(0, 120, 215), 0);
+    lv_obj_set_style_radius(btn, 5, 0);
+    lv_obj_add_event_cb(btn, set_watchface_btn_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, LV_SYMBOL_IMAGE " Set as Watchface");
+    lv_obj_center(btn_label);
 }
 
 // -------------------------

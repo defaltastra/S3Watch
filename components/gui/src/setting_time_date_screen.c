@@ -81,6 +81,7 @@ static void hour_minus(lv_event_t* e)
     if (rtc_get_time(&time) != ESP_OK) return;
     time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_time_display();
 }
 
@@ -91,6 +92,7 @@ static void hour_plus(lv_event_t* e)
     if (rtc_get_time(&time) != ESP_OK) return;
     time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_time_display();
 }
 
@@ -106,6 +108,7 @@ static void minute_minus(lv_event_t* e)
         time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_time_display();
 }
 
@@ -121,6 +124,7 @@ static void minute_plus(lv_event_t* e)
         time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_time_display();
 }
 
@@ -129,10 +133,11 @@ static void year_minus(lv_event_t* e)
     (void)e;
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_year > 0) { // year 1901 minimum
+    if (time.tm_year > 0) {
         time.tm_year--;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 
@@ -141,10 +146,11 @@ static void year_plus(lv_event_t* e)
     (void)e;
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_year < 200) { // year 2100 maximum (1900 + 200)
+    if (time.tm_year < 200) {
         time.tm_year++;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 
@@ -160,6 +166,7 @@ static void month_minus(lv_event_t* e)
         if (time.tm_year > 0) time.tm_year--;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 
@@ -175,6 +182,7 @@ static void month_plus(lv_event_t* e)
         if (time.tm_year < 200) time.tm_year++;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 
@@ -186,17 +194,16 @@ static void day_minus(lv_event_t* e)
     if (time.tm_mday > 1) {
         time.tm_mday--;
     } else {
-        // Move to last day of previous month
         if (time.tm_mon > 0) {
             time.tm_mon--;
         } else {
             time.tm_mon = 11;
             if (time.tm_year > 0) time.tm_year--;
         }
-        // Get last day of month (simplified: assume 31, will be corrected by RTC)
         time.tm_mday = 31;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 
@@ -205,10 +212,9 @@ static void day_plus(lv_event_t* e)
     (void)e;
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_mday < 28) { // Safe increment
+    if (time.tm_mday < 28) {
         time.tm_mday++;
     } else {
-        // Move to first day of next month
         if (time.tm_mon < 11) {
             time.tm_mon++;
         } else {
@@ -218,6 +224,7 @@ static void day_plus(lv_event_t* e)
         time.tm_mday = 1;
     }
     rtc_set_time(&time);
+    settings_save_time(&time);  
     update_date_display();
 }
 

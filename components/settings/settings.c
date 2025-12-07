@@ -14,7 +14,145 @@
 #include "freertos/timers.h"
 #include "cJSON.h"
 #include <string.h>
+#include "nvs_flash.h"
+#include "nvs.h"
 
+// Add these NVS keys
+#define NVS_KEY_WALLPAPER "wallpaper"
+#define NVS_KEY_WALLPAPER_W "wall_w"
+#define NVS_KEY_WALLPAPER_H "wall_h"
+#define NVS_KEY_TIME_YEAR "time_year"
+#define NVS_KEY_TIME_MON "time_mon"
+#define NVS_KEY_TIME_DAY "time_day"
+#define NVS_KEY_TIME_HOUR "time_hour"
+#define NVS_KEY_TIME_MIN "time_min"
+#define NVS_KEY_TIME_SEC "time_sec"
+
+esp_err_t settings_save_time(const struct tm* time)
+{
+    if (!time) return ESP_ERR_INVALID_ARG;
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    
+    nvs_set_i32(handle, NVS_KEY_TIME_YEAR, time->tm_year);
+    nvs_set_i32(handle, NVS_KEY_TIME_MON, time->tm_mon);
+    nvs_set_i32(handle, NVS_KEY_TIME_DAY, time->tm_mday);
+    nvs_set_i32(handle, NVS_KEY_TIME_HOUR, time->tm_hour);
+    nvs_set_i32(handle, NVS_KEY_TIME_MIN, time->tm_min);
+    nvs_set_i32(handle, NVS_KEY_TIME_SEC, time->tm_sec);
+    
+    err = nvs_commit(handle);
+    nvs_close(handle);
+    
+    ESP_LOGI("Settings", "Time saved to NVS");
+    return err;
+}
+
+esp_err_t settings_load_time(struct tm* time)
+{
+    if (!time) return ESP_ERR_INVALID_ARG;
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &handle);
+    if (err != ESP_OK) return err;
+    
+    int32_t val;
+    err = nvs_get_i32(handle, NVS_KEY_TIME_YEAR, &val);
+    if (err == ESP_OK) {
+        time->tm_year = val;
+        nvs_get_i32(handle, NVS_KEY_TIME_MON, &val);
+        time->tm_mon = val;
+        nvs_get_i32(handle, NVS_KEY_TIME_DAY, &val);
+        time->tm_mday = val;
+        nvs_get_i32(handle, NVS_KEY_TIME_HOUR, &val);
+        time->tm_hour = val;
+        nvs_get_i32(handle, NVS_KEY_TIME_MIN, &val);
+        time->tm_min = val;
+        nvs_get_i32(handle, NVS_KEY_TIME_SEC, &val);
+        time->tm_sec = val;
+        
+        ESP_LOGI("Settings", "Time loaded from NVS: %04d-%02d-%02d %02d:%02d:%02d",
+                 time->tm_year + 1900, time->tm_mon + 1, time->tm_mday,
+                 time->tm_hour, time->tm_min, time->tm_sec);
+    }
+    
+    nvs_close(handle);
+    return err;
+}
+esp_err_t settings_set_wallpaper(const char* filepath)
+{
+    if (!filepath) return ESP_ERR_INVALID_ARG;
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    
+    err = nvs_set_str(handle, NVS_KEY_WALLPAPER, filepath);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    
+    nvs_close(handle);
+    ESP_LOGI("Settings", "Wallpaper saved: %s", filepath);
+    return err;
+}
+
+esp_err_t settings_get_wallpaper(char* filepath, size_t max_len)
+{
+    if (!filepath || max_len == 0) return ESP_ERR_INVALID_ARG;
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &handle);
+    if (err != ESP_OK) return err;
+    
+    size_t len = max_len;
+    err = nvs_get_str(handle, NVS_KEY_WALLPAPER, filepath, &len);
+    
+    nvs_close(handle);
+    
+    if (err == ESP_OK) {
+        ESP_LOGI("Settings", "Wallpaper loaded: %s", filepath);
+    }
+    
+    return err;
+}
+
+esp_err_t settings_set_wallpaper_dimensions(uint16_t width, uint16_t height)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    
+    err = nvs_set_u16(handle, NVS_KEY_WALLPAPER_W, width);
+    if (err == ESP_OK) {
+        err = nvs_set_u16(handle, NVS_KEY_WALLPAPER_H, height);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    
+    nvs_close(handle);
+    return err;
+}
+
+esp_err_t settings_get_wallpaper_dimensions(uint16_t* width, uint16_t* height)
+{
+    if (!width || !height) return ESP_ERR_INVALID_ARG;
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &handle);
+    if (err != ESP_OK) return err;
+    
+    err = nvs_get_u16(handle, NVS_KEY_WALLPAPER_W, width);
+    if (err == ESP_OK) {
+        err = nvs_get_u16(handle, NVS_KEY_WALLPAPER_H, height);
+    }
+    
+    nvs_close(handle);
+    return err;
+}
 static const char *TAG = "SETTINGS";
 static uint8_t brightness = 30;
 static uint32_t display_timeout_ms = 30000;
@@ -191,18 +329,35 @@ static bool settings_read_json(void)
 }
 
 void settings_init(void) {
+    esp_err_t err;
+    
+    // Initialize NVS FIRST - required for wallpaper and time persistence
+    err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition needs erase, erasing...");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "NVS initialized successfully");
+    }
+    
     ESP_LOGI(TAG, "Settings init: mount + load JSON");
     (void)settings_load();
+    
     // Ensure brightness is applied even if using defaults
     bsp_display_brightness_set(brightness);
-
+    
     struct tm time;
     if (rtc_get_time(&time) == ESP_OK) {
-        if (time.tm_year < 2025) { // struct tm year is years since 1900
+        if (time.tm_year < 125) { // tm_year is years since 1900, so 125 = 2025
             ESP_LOGI(TAG, "Time not set, setting to default");
             struct tm default_time = {
-                .tm_year = 2025, // 2024
-                .tm_mon = 1,    // January
+                .tm_year = 125,  // 2025 - 1900 = 125
+                .tm_mon = 0,     // January (0-11)
                 .tm_mday = 1,
                 .tm_hour = 12,
                 .tm_min = 0,
@@ -211,10 +366,9 @@ void settings_init(void) {
             rtc_set_time(&default_time);
         }
     }
-
+    
     rtc_start();
 }
-
 void settings_set_brightness(uint8_t level) {
     brightness = level;
     bsp_display_brightness_set(brightness);

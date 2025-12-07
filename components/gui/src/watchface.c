@@ -6,13 +6,15 @@
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
-
 #include "ui.h"
 #include "steps_screen.h"
 #include "settings_screen.h"
 #include "notifications.h"
-
-
+#include "media_player.h"  
+#include <sys/stat.h>      
+#include <strings.h>       
+#include <string.h>
+#include "bsp/esp-bsp.h"
 static lv_obj_t* watchface_screen;
 static lv_obj_t* label_hour;
 static lv_obj_t* label_minute;
@@ -24,6 +26,11 @@ static lv_obj_t* lbl_batt_pct;
 static lv_obj_t* lbl_charge_icon;
 static lv_obj_t* img_ble;
 static lv_timer_t* s_timer = NULL;
+
+// Forward declarations
+static void screen_events(lv_event_t* e);
+static void update_time_task(lv_timer_t* timer);
+esp_err_t watchface_load_saved_background(void); 
 
 
 //static lv_style_t main_style;
@@ -67,24 +74,54 @@ static void update_time_task(lv_timer_t* timer)
     bsp_display_unlock();
 }
 
+esp_err_t watchface_load_saved_background(void)
+{
+    // Check if SD card is mounted first
+    extern sdmmc_card_t *bsp_sdcard;
+    if (bsp_sdcard == NULL) {
+        ESP_LOGI("Watchface", "SD card not mounted yet, attempting to mount...");
+        esp_err_t mount_err = bsp_sdcard_mount();
+        if (mount_err != ESP_OK) {
+            ESP_LOGW("Watchface", "Failed to mount SD card: %s", esp_err_to_name(mount_err));
+            return ESP_ERR_NOT_FOUND;
+        }
+    }
+    
+    char filepath[256];
+    esp_err_t err = settings_get_wallpaper(filepath, sizeof(filepath));
+    
+    if (err != ESP_OK) {
+        ESP_LOGI("Watchface", "No saved wallpaper found, using default");
+        return err;
+    }
+    
+    // Check if file exists
+    struct stat st;
+    if (stat(filepath, &st) != 0) {
+        ESP_LOGW("Watchface", "Saved wallpaper file not found: %s", filepath);
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    // Check if it's a RAW file
+    const char* ext = strrchr(filepath, '.');
+    if (ext && (strcasecmp(ext, ".raw") == 0 || strcasecmp(ext, ".rgb565") == 0)) {
+        // Load dimensions
+        uint16_t w = 410, h = 502; // defaults
+        settings_get_wallpaper_dimensions(&w, &h);
+        ESP_LOGI("Watchface", "Restoring RAW wallpaper: %s (%dx%d)", filepath, w, h);
+        return watchface_set_background_from_file_fast(filepath, w, h);
+    } else {
+        ESP_LOGI("Watchface", "Restoring wallpaper: %s", filepath);
+        return watchface_set_background_from_file_fast(filepath, 0, 0);
+    }
+}
+
+
 void watchface_create(lv_obj_t* parent) {
-
-    //lv_obj_remove_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
-    //lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x000000), 0);
-
-    /*if(!inited) {
-        lv_style_init(&main_style);
-        lv_style_set_text_color(&main_style, lv_color_white());
-        lv_style_set_bg_color(&main_style, lv_color_black());
-        lv_style_set_bg_opa(&main_style, LV_OPA_100);
-        //lv_style_set_radius(&main_style, LV_RADIUS_CIRCLE);
-    }*/
 
     watchface_screen = lv_obj_create(parent);
     lv_obj_remove_style_all(watchface_screen);
     lv_obj_set_size(watchface_screen, lv_pct(100), lv_pct(100));
-    //lv_obj_add_style(watchface_screen, &main_style, 0);
-    //lv_obj_remove_flag(watchface_screen, LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_remove_flag(watchface_screen, LV_OBJ_FLAG_SCROLLABLE);
     
 
@@ -123,7 +160,6 @@ void watchface_create(lv_obj_t* parent) {
     lv_obj_set_align(date_cont, LV_ALIGN_RIGHT_MID);
     lv_obj_set_flex_flow(date_cont, LV_FLEX_FLOW_COLUMN);
 
-
     label_date = lv_label_create(date_cont);
     lv_label_set_text(label_date, "--/--");
     lv_obj_set_style_text_letter_space(label_date, 1, 0);
@@ -136,26 +172,20 @@ void watchface_create(lv_obj_t* parent) {
     lv_obj_set_style_text_font(label_weekday, &font_bold_32, 0);
     lv_obj_set_style_text_color(label_weekday, lv_color_hex(0xc0c0c0), LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    // Battery icon on top-left
     extern const lv_image_dsc_t image_battery_icon;
     img_battery = lv_image_create(watchface_screen);
     lv_image_set_src(img_battery, &image_battery_icon);
     lv_obj_set_align(img_battery, LV_ALIGN_TOP_MID);
     lv_obj_set_x(img_battery, -100);
-    //lv_obj_set_pos(img_battery, 8, 8);
     lv_obj_set_style_img_recolor_opa(img_battery, LV_OPA_COVER, 0);
     lv_obj_set_style_img_recolor(img_battery, lv_color_hex(0x909090), 0);
 
-    // Battery percent label next to icon
     lbl_batt_pct = lv_label_create(watchface_screen);
-    //lv_obj_set_align(lbl_batt_pct, LV_ALIGN_TOP_LEFT);
-    //lv_obj_set_pos(lbl_batt_pct, 8 + 53 + 8, 16); // icon width + padding
     lv_obj_align_to(lbl_batt_pct, img_battery, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
     lv_obj_set_style_text_color(lbl_batt_pct, lv_color_hex(0xc0c0c0), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_label_set_text(lbl_batt_pct, "--%");
     lv_obj_set_style_text_font(lbl_batt_pct, &font_normal_26, 0);
 
-    // Charging lightning overlay on top of battery icon
     lbl_charge_icon = lv_label_create(img_battery);
 #ifdef LV_SYMBOL_CHARGE
     lv_label_set_text(lbl_charge_icon, LV_SYMBOL_CHARGE);
@@ -163,29 +193,25 @@ void watchface_create(lv_obj_t* parent) {
     lv_label_set_text(lbl_charge_icon, "⚡");
 #endif
     lv_obj_center(lbl_charge_icon);
-    // Use default LVGL font to ensure symbol glyphs are present
     lv_obj_set_style_text_font(lbl_charge_icon, LV_FONT_DEFAULT, 0);
     lv_obj_set_style_text_color(lbl_charge_icon, lv_color_white(), 0);
     lv_obj_add_flag(lbl_charge_icon, LV_OBJ_FLAG_HIDDEN);
 
-    // BLE status icon on top-right
     extern const lv_image_dsc_t image_bluetooth_icon;
     img_ble = lv_image_create(watchface_screen);
     lv_image_set_src(img_ble, &image_bluetooth_icon);
     lv_obj_set_align(img_ble, LV_ALIGN_TOP_MID);
     lv_obj_set_x(img_ble, 100);
-    //lv_obj_set_align(img_ble, LV_ALIGN_TOP_RIGHT);
-    //lv_obj_set_pos(img_ble, -8, 8);
     lv_obj_set_style_img_recolor_opa(img_ble, LV_OPA_COVER, 0);
-    // Default to disconnected (grey)
     lv_obj_set_style_img_recolor(img_ble, lv_color_hex(0x606060), 0);
 
     s_timer = lv_timer_create(update_time_task, 1000, NULL);
     lv_timer_ready(s_timer);
 
-    //lv_obj_add_event_cb(watchface_screen, screen_events, LV_EVENT_ALL, NULL);
-    //lv_obj_clear_flag(watchface_screen, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    // Restore saved wallpaper
+    watchface_load_saved_background();
 }
+
 
 static void screen_events(lv_event_t* e)
 {

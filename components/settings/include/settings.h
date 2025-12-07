@@ -9,7 +9,66 @@ extern "C" {
 #define SETTINGS_DISPLAY_TIMEOUT_20S 20000
 #define SETTINGS_DISPLAY_TIMEOUT_30S 30000
 #define SETTINGS_DISPLAY_TIMEOUT_1MIN 60000
+#ifndef SETTINGS_H
+#define SETTINGS_H
+#include <time.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include "esp_err.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Your existing functions...
+bool settings_get_time_format_24h(void);
+void settings_set_time_format_24h(bool is_24h);
+
+// Wallpaper functions
+esp_err_t settings_set_wallpaper(const char* filepath);
+esp_err_t settings_get_wallpaper(char* filepath, size_t max_len);
+esp_err_t settings_get_wallpaper_dimensions(uint16_t* width, uint16_t* height);
+esp_err_t settings_set_wallpaper_dimensions(uint16_t width, uint16_t height);
+esp_err_t settings_save_time(const struct tm* time);
+esp_err_t settings_load_time(struct tm* time);
+#ifdef __cplusplus
+}
+#endif
+
+#endif // SETTINGS_H
+/**
+ * @brief Save wallpaper path to NVS
+ * @param filepath Path to wallpaper file
+ * @return ESP_OK on success
+ */
+ esp_err_t settings_set_wallpaper(const char* filepath);
+
+ /**
+  * @brief Get saved wallpaper path from NVS
+  * @param filepath Buffer to store path (should be at least 256 bytes)
+  * @param max_len Maximum buffer size
+  * @return ESP_OK on success, ESP_ERR_NOT_FOUND if no wallpaper saved
+  */
+ esp_err_t settings_get_wallpaper(char* filepath, size_t max_len);
+ 
+ /**
+  * @brief Get wallpaper dimensions if it's a RAW file
+  * @param width Output for width
+  * @param height Output for height
+  * @return ESP_OK if dimensions are saved
+  */
+ esp_err_t settings_get_wallpaper_dimensions(uint16_t* width, uint16_t* height);
+ 
+ /**
+  * @brief Save wallpaper dimensions for RAW files
+  */
+ esp_err_t settings_set_wallpaper_dimensions(uint16_t width, uint16_t height);
+ /**
+ * @brief Load and apply saved wallpaper from NVS
+ * @return ESP_OK on success, ESP_ERR_NOT_FOUND if no wallpaper saved
+ */
+esp_err_t watchface_load_saved_background(void);
 void settings_init(void);
 void settings_set_brightness(uint8_t level);
 uint8_t settings_get_brightness(void);
