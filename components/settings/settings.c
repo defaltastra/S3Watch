@@ -56,31 +56,48 @@ esp_err_t settings_load_time(struct tm* time)
     
     nvs_handle_t handle;
     esp_err_t err = nvs_open("storage", NVS_READONLY, &handle);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        ESP_LOGE("Settings", "Failed to open NVS for time load: %s", esp_err_to_name(err));
+        return err;
+    }
     
     int32_t val;
     err = nvs_get_i32(handle, NVS_KEY_TIME_YEAR, &val);
     if (err == ESP_OK) {
         time->tm_year = val;
-        nvs_get_i32(handle, NVS_KEY_TIME_MON, &val);
+        
+        err = nvs_get_i32(handle, NVS_KEY_TIME_MON, &val);
+        if (err != ESP_OK) goto cleanup;
         time->tm_mon = val;
-        nvs_get_i32(handle, NVS_KEY_TIME_DAY, &val);
+        
+        err = nvs_get_i32(handle, NVS_KEY_TIME_DAY, &val);
+        if (err != ESP_OK) goto cleanup;
         time->tm_mday = val;
-        nvs_get_i32(handle, NVS_KEY_TIME_HOUR, &val);
+        
+        err = nvs_get_i32(handle, NVS_KEY_TIME_HOUR, &val);
+        if (err != ESP_OK) goto cleanup;
         time->tm_hour = val;
-        nvs_get_i32(handle, NVS_KEY_TIME_MIN, &val);
+        
+        err = nvs_get_i32(handle, NVS_KEY_TIME_MIN, &val);
+        if (err != ESP_OK) goto cleanup;
         time->tm_min = val;
-        nvs_get_i32(handle, NVS_KEY_TIME_SEC, &val);
+        
+        err = nvs_get_i32(handle, NVS_KEY_TIME_SEC, &val);
+        if (err != ESP_OK) goto cleanup;
         time->tm_sec = val;
         
         ESP_LOGI("Settings", "Time loaded from NVS: %04d-%02d-%02d %02d:%02d:%02d",
                  time->tm_year + 1900, time->tm_mon + 1, time->tm_mday,
                  time->tm_hour, time->tm_min, time->tm_sec);
+    } else {
+        ESP_LOGI("Settings", "No time data in NVS: %s", esp_err_to_name(err));
     }
     
+cleanup:
     nvs_close(handle);
     return err;
 }
+
 esp_err_t settings_set_wallpaper(const char* filepath)
 {
     if (!filepath) return ESP_ERR_INVALID_ARG;
@@ -329,46 +346,43 @@ static bool settings_read_json(void)
 }
 
 void settings_init(void) {
-    esp_err_t err;
-    
-    // Initialize NVS FIRST - required for wallpaper and time persistence
-    err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition needs erase, erasing...");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "NVS initialized successfully");
-    }
-    
     ESP_LOGI(TAG, "Settings init: mount + load JSON");
     (void)settings_load();
-    
-    // Ensure brightness is applied even if using defaults
+
     bsp_display_brightness_set(brightness);
-    
+
+    struct tm loaded;
+    if (settings_load_time(&loaded) == ESP_OK) {
+        ESP_LOGI(TAG, "Restoring RTC from NVS");
+        rtc_set_time(&loaded);
+    } else {
+        ESP_LOGI(TAG, "No stored time found in NVS");
+    }
+
     struct tm time;
     if (rtc_get_time(&time) == ESP_OK) {
-        if (time.tm_year < 125) { // tm_year is years since 1900, so 125 = 2025
-            ESP_LOGI(TAG, "Time not set, setting to default");
+        if (time.tm_year < 120) {
+            ESP_LOGI(TAG, "Time appears invalid, setting to default");
             struct tm default_time = {
-                .tm_year = 125,  // 2025 - 1900 = 125
-                .tm_mon = 0,     // January (0-11)
+                .tm_year = 125,
+                .tm_mon = 0,
                 .tm_mday = 1,
                 .tm_hour = 12,
                 .tm_min = 0,
                 .tm_sec = 0
             };
             rtc_set_time(&default_time);
+            settings_save_time(&default_time);
+        } else {
+            ESP_LOGI(TAG, "RTC time looks valid: %04d-%02d-%02d",
+                     time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
         }
     }
-    
+
     rtc_start();
 }
+
+
 void settings_set_brightness(uint8_t level) {
     brightness = level;
     bsp_display_brightness_set(brightness);

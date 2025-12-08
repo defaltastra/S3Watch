@@ -14,7 +14,7 @@
 #include "bsp_board_extra.h"
 #include "pcf85063a.h"
 #include "ble_sync.h"
-
+#include "nvs_flash.h"
 static const char *TAG = "bsp_extra_board";
 
 static i2c_master_bus_handle_t bus_handle;
@@ -68,7 +68,20 @@ int rtc_register_write(uint8_t regAddr, uint8_t *data, uint8_t len) {
 esp_err_t bsp_extra_init(void)
 {
     esp_err_t ret;
-    // Ensure default event loop exists for cross-component events
+    
+    ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition needs erase, erasing...");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "NVS initialized successfully");
+    }
+    
     (void)esp_event_loop_create_default();
     
     bus_handle = bsp_i2c_get_handle();
@@ -85,7 +98,6 @@ esp_err_t bsp_extra_init(void)
         return ret;
     }
     
-    // NEW: Restore saved time from NVS
     struct tm saved_time;
     if (settings_load_time(&saved_time) == ESP_OK) {
         if (pcf85063a_set_time(&saved_time) == ESP_OK) {

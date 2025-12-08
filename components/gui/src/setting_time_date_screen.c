@@ -81,7 +81,7 @@ static void hour_minus(lv_event_t* e)
     if (rtc_get_time(&time) != ESP_OK) return;
     time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_time_display();
 }
 
@@ -92,7 +92,7 @@ static void hour_plus(lv_event_t* e)
     if (rtc_get_time(&time) != ESP_OK) return;
     time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_time_display();
 }
 
@@ -108,7 +108,7 @@ static void minute_minus(lv_event_t* e)
         time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_time_display();
 }
 
@@ -124,7 +124,7 @@ static void minute_plus(lv_event_t* e)
         time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_time_display();
 }
 
@@ -137,7 +137,7 @@ static void year_minus(lv_event_t* e)
         time.tm_year--;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -150,7 +150,7 @@ static void year_plus(lv_event_t* e)
         time.tm_year++;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -166,7 +166,7 @@ static void month_minus(lv_event_t* e)
         if (time.tm_year > 0) time.tm_year--;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -182,7 +182,7 @@ static void month_plus(lv_event_t* e)
         if (time.tm_year < 200) time.tm_year++;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -203,7 +203,7 @@ static void day_minus(lv_event_t* e)
         time.tm_mday = 31;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -224,7 +224,7 @@ static void day_plus(lv_event_t* e)
         time.tm_mday = 1;
     }
     rtc_set_time(&time);
-    settings_save_time(&time);  
+      
     update_date_display();
 }
 
@@ -344,6 +344,14 @@ void setting_time_date_screen_create(lv_obj_t* parent)
 static void on_delete(lv_event_t* e)
 {
     (void)e;
+    
+    // Save the current time to NVS when exiting
+    struct tm time;
+    if (rtc_get_time(&time) == ESP_OK) {
+        settings_save_time(&time);
+        ESP_LOGI(TAG, "Time saved to NVS on exit");
+    }
+    
     ESP_LOGI(TAG, "Time & Date screen deleted");
     stime_date_screen = NULL;
 }
