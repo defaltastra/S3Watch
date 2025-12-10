@@ -3,5 +3,5 @@ idf_component_register(
     "settings.c" 
 
     INCLUDE_DIRS "include" 
-    REQUIRES esp32_s3_touch_amoled_2_06 bsp_extra spiffs nvs_flash json
+    REQUIRES esp32_s3_touch_amoled_2_06 bsp_extra spiffs nvs_flash json 
 )
