@@ -8,12 +8,9 @@
 #include <time.h>
 
 static lv_obj_t* stime_date_screen;
-static lv_obj_t* format_switch;
-static lv_obj_t* hour_label;
-static lv_obj_t* minute_label;
-static lv_obj_t* year_label;
-static lv_obj_t* month_label;
-static lv_obj_t* day_label;
+static lv_obj_t* time_display;
+static lv_obj_t* date_display;
+
 static void on_delete(lv_event_t* e);
 static const char* TAG = "TimeDate";
 
@@ -28,331 +25,195 @@ static void screen_events(lv_event_t* e)
     }
 }
 
-static void update_time_display(void)
+static void update_displays(void)
 {
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
     
-    int hour = time.tm_hour;
-    int minute = time.tm_min;
-    bool is_24h = settings_get_time_format_24h();
-    
-    if (hour_label) {
-        if (is_24h) {
-            lv_label_set_text_fmt(hour_label, "%02d", hour);
-        } else {
-            int hour_12 = hour % 12;
-            if (hour_12 == 0) hour_12 = 12;
-            lv_label_set_text_fmt(hour_label, "%02d", hour_12);
-        }
+    bool locked = bsp_display_lock(0);
+    if (time_display) {
+        lv_label_set_text_fmt(time_display, "%02d:%02d", time.tm_hour, time.tm_min);
     }
-    if (minute_label) {
-        lv_label_set_text_fmt(minute_label, "%02d", minute);
+    if (date_display) {
+        lv_label_set_text_fmt(date_display, "%04d-%02d-%02d", 
+                              time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
     }
+    if (locked) bsp_display_unlock();
 }
 
-static void update_date_display(void)
+static void time_btn_clicked(lv_event_t* e)
 {
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
     
-    if (year_label) {
-        lv_label_set_text_fmt(year_label, "%04d", time.tm_year + 1900);
+    int btn_id = (int)(uintptr_t)lv_event_get_user_data(e);
+    
+    switch(btn_id) {
+        case 0: // Hour -
+            time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
+            break;
+        case 1: // Hour +
+            time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
+            break;
+        case 2: // Min -
+            time.tm_min = (time.tm_min > 0) ? time.tm_min - 1 : 59;
+            break;
+        case 3: // Min +
+            time.tm_min = (time.tm_min < 59) ? time.tm_min + 1 : 0;
+            break;
     }
-    if (month_label) {
-        lv_label_set_text_fmt(month_label, "%02d", time.tm_mon + 1);
-    }
-    if (day_label) {
-        lv_label_set_text_fmt(day_label, "%02d", time.tm_mday);
-    }
-}
-
-static void format_toggle(lv_event_t* e)
-{
-    bool is_24h = lv_obj_has_state(format_switch, LV_STATE_CHECKED);
-    settings_set_time_format_24h(is_24h);
-    update_time_display();
-}
-
-static void hour_minus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
+    
     rtc_set_time(&time);
-      
-    update_time_display();
+    update_displays();
 }
 
-static void hour_plus(lv_event_t* e)
+static void date_btn_clicked(lv_event_t* e)
 {
-    (void)e;
     struct tm time;
     if (rtc_get_time(&time) != ESP_OK) return;
-    time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
-    rtc_set_time(&time);
-      
-    update_time_display();
-}
-
-static void minute_minus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_min > 0) {
-        time.tm_min--;
-    } else {
-        time.tm_min = 59;
-        time.tm_hour = (time.tm_hour > 0) ? time.tm_hour - 1 : 23;
-    }
-    rtc_set_time(&time);
-      
-    update_time_display();
-}
-
-static void minute_plus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_min < 59) {
-        time.tm_min++;
-    } else {
-        time.tm_min = 0;
-        time.tm_hour = (time.tm_hour < 23) ? time.tm_hour + 1 : 0;
-    }
-    rtc_set_time(&time);
-      
-    update_time_display();
-}
-
-static void year_minus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_year > 0) {
-        time.tm_year--;
-    }
-    rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static void year_plus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_year < 200) {
-        time.tm_year++;
-    }
-    rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static void month_minus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_mon > 0) {
-        time.tm_mon--;
-    } else {
-        time.tm_mon = 11;
-        if (time.tm_year > 0) time.tm_year--;
-    }
-    rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static void month_plus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_mon < 11) {
-        time.tm_mon++;
-    } else {
-        time.tm_mon = 0;
-        if (time.tm_year < 200) time.tm_year++;
-    }
-    rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static void day_minus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_mday > 1) {
-        time.tm_mday--;
-    } else {
-        if (time.tm_mon > 0) {
-            time.tm_mon--;
-        } else {
-            time.tm_mon = 11;
+    
+    int btn_id = (int)(uintptr_t)lv_event_get_user_data(e);
+    
+    switch(btn_id) {
+        case 0: // Year -
             if (time.tm_year > 0) time.tm_year--;
-        }
-        time.tm_mday = 31;
-    }
-    rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static void day_plus(lv_event_t* e)
-{
-    (void)e;
-    struct tm time;
-    if (rtc_get_time(&time) != ESP_OK) return;
-    if (time.tm_mday < 28) {
-        time.tm_mday++;
-    } else {
-        if (time.tm_mon < 11) {
-            time.tm_mon++;
-        } else {
-            time.tm_mon = 0;
+            break;
+        case 1: // Year +
             if (time.tm_year < 200) time.tm_year++;
-        }
-        time.tm_mday = 1;
+            break;
+        case 2: // Month -
+            if (time.tm_mon > 0) time.tm_mon--;
+            else { time.tm_mon = 11; if (time.tm_year > 0) time.tm_year--; }
+            break;
+        case 3: // Month +
+            if (time.tm_mon < 11) time.tm_mon++;
+            else { time.tm_mon = 0; if (time.tm_year < 200) time.tm_year++; }
+            break;
+        case 4: // Day -
+            if (time.tm_mday > 1) time.tm_mday--;
+            break;
+        case 5: // Day +
+            if (time.tm_mday < 28) time.tm_mday++;
+            break;
     }
+    
     rtc_set_time(&time);
-      
-    update_date_display();
-}
-
-static lv_obj_t* make_value_control(lv_obj_t* parent, const char* label_text, lv_obj_t** value_label, 
-                                     lv_event_cb_t minus_cb, lv_event_cb_t plus_cb)
-{
-    lv_obj_t* container = lv_obj_create(parent);
-    lv_obj_remove_style_all(container);
-    lv_obj_set_size(container, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(container, 8, 0);
-    lv_obj_set_style_margin_bottom(container, 12, 0);
-    lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    
-    lv_obj_t* label = lv_label_create(container);
-    lv_obj_set_style_text_font(label, &font_normal_28, 0);
-    lv_label_set_text(label, label_text);
-    
-    lv_obj_t* box = lv_obj_create(container);
-    lv_obj_remove_style_all(box);
-    lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    
-    lv_obj_t* btn_m = lv_btn_create(box);
-    lv_obj_set_size(btn_m, 60, 60);
-    lv_obj_add_event_cb(btn_m, minus_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* lm = lv_label_create(btn_m);
-    lv_obj_set_style_text_font(lm, &font_bold_32, 0);
-    lv_label_set_text(lm, "-");
-    
-    *value_label = lv_label_create(box);
-    lv_obj_set_style_text_font(*value_label, &font_numbers_80, 0);
-    lv_obj_set_style_pad_hor(*value_label, 12, 0);
-    lv_label_set_text(*value_label, "--");
-    
-    lv_obj_t* btn_p = lv_btn_create(box);
-    lv_obj_set_size(btn_p, 60, 60);
-    lv_obj_add_event_cb(btn_p, plus_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* lp = lv_label_create(btn_p);
-    lv_obj_set_style_text_font(lp, &font_bold_32, 0);
-    lv_label_set_text(lp, "+");
-    
-    return container;
+    update_displays();
 }
 
 void setting_time_date_screen_create(lv_obj_t* parent)
 {
-    static lv_style_t style;
-    lv_style_init(&style);
-    lv_style_set_text_color(&style, lv_color_white());
-    lv_style_set_bg_color(&style, lv_color_black());
-    lv_style_set_bg_opa(&style, LV_OPA_COVER);
-
     stime_date_screen = lv_obj_create(parent);
-    lv_obj_remove_style_all(stime_date_screen);
-    lv_obj_add_style(stime_date_screen, &style, 0);
+    lv_obj_set_style_bg_color(stime_date_screen, lv_color_black(), 0);
     lv_obj_set_size(stime_date_screen, lv_pct(100), lv_pct(100));
     lv_obj_add_flag(stime_date_screen, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_flag(stime_date_screen, LV_OBJ_FLAG_USER_1);
     lv_obj_add_event_cb(stime_date_screen, screen_events, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(stime_date_screen, on_delete, LV_EVENT_DELETE, NULL);
+    lv_obj_set_flex_flow(stime_date_screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(stime_date_screen, 20, 0);
+    lv_obj_set_style_pad_gap(stime_date_screen, 16, 0);
 
-    // Header
-    lv_obj_t* hdr = lv_obj_create(stime_date_screen);
-    lv_obj_remove_style_all(hdr);
-    lv_obj_set_size(hdr, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-    lv_obj_t* title = lv_label_create(hdr);
+    // Title
+    lv_obj_t* title = lv_label_create(stime_date_screen);
     lv_obj_set_style_text_font(title, &font_bold_32, 0);
-    lv_label_set_text(title, "Time & Date");
+    lv_label_set_text(title, "Set Time & Date");
 
-    // Scrollable content
-    lv_obj_t* content = lv_obj_create(stime_date_screen);
-    lv_obj_remove_style_all(content);
-    lv_obj_set_size(content, lv_pct(100), lv_pct(85));
-    lv_obj_add_flag(content, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_set_style_pad_all(content, 16, 0);
-    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    // TIME section
+    lv_obj_t* time_label = lv_label_create(stime_date_screen);
+    lv_obj_set_style_text_font(time_label, &font_normal_26, 0);
+    lv_obj_set_style_text_color(time_label, lv_color_hex(0x888888), 0);
+    lv_label_set_text(time_label, "TIME");
 
-    // Time format toggle
-    lv_obj_t* format_row = lv_obj_create(content);
-    lv_obj_remove_style_all(format_row);
-    lv_obj_set_size(format_row, lv_pct(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(format_row, 8, 0);
-    lv_obj_set_style_margin_bottom(format_row, 20, 0);
-    lv_obj_set_flex_flow(format_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(format_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    
-    lv_obj_t* format_label = lv_label_create(format_row);
-    lv_obj_set_style_text_font(format_label, &font_normal_28, 0);
-    lv_label_set_text(format_label, "24-hour format");
-    
-    format_switch = lv_switch_create(format_row);
-    lv_obj_set_size(format_switch, 100, 50);
-    if (settings_get_time_format_24h()) {
-        lv_obj_add_state(format_switch, LV_STATE_CHECKED);
+    time_display = lv_label_create(stime_date_screen);
+    lv_obj_set_style_text_font(time_display, &font_numbers_80, 0);
+    lv_label_set_text(time_display, "00:00");
+
+    // Time buttons
+    lv_obj_t* time_btns = lv_obj_create(stime_date_screen);
+    lv_obj_set_size(time_btns, lv_pct(100), 60);
+    lv_obj_set_style_bg_opa(time_btns, 0, 0);
+    lv_obj_set_style_border_width(time_btns, 0, 0);
+    lv_obj_set_style_pad_all(time_btns, 0, 0);
+    lv_obj_set_flex_flow(time_btns, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(time_btns, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    const char* time_btn_labels[] = {"H-", "H+", "M-", "M+"};
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t* btn = lv_btn_create(time_btns);
+        lv_obj_set_size(btn, 80, 55);
+        lv_obj_add_event_cb(btn, time_btn_clicked, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_obj_set_style_text_font(lbl, &font_bold_32, 0);
+        lv_label_set_text(lbl, time_btn_labels[i]);
+        lv_obj_center(lbl);
     }
-    lv_obj_add_event_cb(format_switch, format_toggle, LV_EVENT_VALUE_CHANGED, NULL);
 
-    // Time controls
-    make_value_control(content, "Hour", &hour_label, hour_minus, hour_plus);
-    make_value_control(content, "Minute", &minute_label, minute_minus, minute_plus);
+    // Spacer
+    lv_obj_t* spacer = lv_obj_create(stime_date_screen);
+    lv_obj_set_size(spacer, lv_pct(100), 2);
+    lv_obj_set_style_bg_color(spacer, lv_color_hex(0x404040), 0);
+    lv_obj_set_style_bg_opa(spacer, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(spacer, 0, 0);
 
-    // Date controls
-    make_value_control(content, "Year", &year_label, year_minus, year_plus);
-    make_value_control(content, "Month", &month_label, month_minus, month_plus);
-    make_value_control(content, "Day", &day_label, day_minus, day_plus);
+    // DATE section
+    lv_obj_t* date_label = lv_label_create(stime_date_screen);
+    lv_obj_set_style_text_font(date_label, &font_normal_26, 0);
+    lv_obj_set_style_text_color(date_label, lv_color_hex(0x888888), 0);
+    lv_label_set_text(date_label, "DATE");
 
-    update_time_display();
-    update_date_display();
+    date_display = lv_label_create(stime_date_screen);
+    lv_obj_set_style_text_font(date_display, &font_bold_32, 0);
+    lv_label_set_text(date_display, "2025-01-01");
+
+    // Date buttons (2 rows)
+    lv_obj_t* date_btns1 = lv_obj_create(stime_date_screen);
+    lv_obj_set_size(date_btns1, lv_pct(100), 55);
+    lv_obj_set_style_bg_opa(date_btns1, 0, 0);
+    lv_obj_set_style_border_width(date_btns1, 0, 0);
+    lv_obj_set_style_pad_all(date_btns1, 0, 0);
+    lv_obj_set_flex_flow(date_btns1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(date_btns1, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    const char* date_btn_labels1[] = {"Y-", "Y+", "M-", "M+"};
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t* btn = lv_btn_create(date_btns1);
+        lv_obj_set_size(btn, 80, 50);
+        lv_obj_add_event_cb(btn, date_btn_clicked, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_obj_set_style_text_font(lbl, &font_normal_28, 0);
+        lv_label_set_text(lbl, date_btn_labels1[i]);
+        lv_obj_center(lbl);
+    }
+
+    lv_obj_t* date_btns2 = lv_obj_create(stime_date_screen);
+    lv_obj_set_size(date_btns2, lv_pct(100), 55);
+    lv_obj_set_style_bg_opa(date_btns2, 0, 0);
+    lv_obj_set_style_border_width(date_btns2, 0, 0);
+    lv_obj_set_style_pad_all(date_btns2, 0, 0);
+    lv_obj_set_flex_flow(date_btns2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(date_btns2, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    const char* date_btn_labels2[] = {"D-", "D+"};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t* btn = lv_btn_create(date_btns2);
+        lv_obj_set_size(btn, 80, 50);
+        lv_obj_add_event_cb(btn, date_btn_clicked, LV_EVENT_CLICKED, (void*)(uintptr_t)(i + 4));
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_obj_set_style_text_font(lbl, &font_normal_28, 0);
+        lv_label_set_text(lbl, date_btn_labels2[i]);
+        lv_obj_center(lbl);
+    }
+
+    update_displays();
 }
 
 static void on_delete(lv_event_t* e)
 {
-    (void)e;
-    
-    // Save the current time to NVS when exiting
     struct tm time;
     if (rtc_get_time(&time) == ESP_OK) {
         settings_save_time(&time);
-        ESP_LOGI(TAG, "Time saved to NVS on exit");
+        ESP_LOGI(TAG, "Time saved");
     }
-    
-    ESP_LOGI(TAG, "Time & Date screen deleted");
     stime_date_screen = NULL;
 }
 
@@ -365,5 +226,3 @@ lv_obj_t* setting_time_date_screen_get(void)
     }
     return stime_date_screen;
 }
-
-

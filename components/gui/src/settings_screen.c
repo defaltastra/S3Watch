@@ -16,13 +16,9 @@
 
 static const char* TAG = "SETTINGS SCREEN";
 
-// Use accessor from batt_screen instead of extern symbol
-
-LV_IMAGE_DECLARE(image_mute_icon);
 LV_IMAGE_DECLARE(image_flashlight_icon);
 LV_IMAGE_DECLARE(image_brightness_icon);
 LV_IMAGE_DECLARE(image_battery_icon);
-LV_IMAGE_DECLARE(image_silence_icon);
 LV_IMAGE_DECLARE(image_bluetooth_icon);
 LV_IMAGE_DECLARE(image_settings_icon);
 
@@ -38,7 +34,6 @@ static lv_timer_t* time_timer;
 
 static const lv_image_dsc_t* control_icons[] = {
     &image_brightness_icon,
-    &image_silence_icon,
     &image_flashlight_icon,
     &image_battery_icon,
     &image_bluetooth_icon,
@@ -47,7 +42,6 @@ static const lv_image_dsc_t* control_icons[] = {
 
 static const char* control_labels[] = {
     "Brightness",
-    "Silence",
     "Flashlight",
     "Battery",
     "Bluetooth",
@@ -56,7 +50,6 @@ static const char* control_labels[] = {
 
 enum control_id {
     CTRL_BRIGHTNESS = 0,
-    CTRL_SILENCE,
     CTRL_FLASHLIGHT,
     CTRL_BATTERY,
     CTRL_BLUETOOTH,
@@ -139,10 +132,6 @@ void control_screen_create(lv_obj_t* parent)
     lv_obj_remove_style_all(header);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(header, lv_pct(100), LV_SIZE_CONTENT);
-    //lv_obj_set_style_pad_left(header, 20, 0);
-    //lv_obj_set_style_pad_right(header, 20, 0);
-    //lv_obj_set_style_pad_top(header, 10, 0);
-    //lv_obj_set_style_pad_bottom(header, 6, 0);
     lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -155,7 +144,6 @@ void control_screen_create(lv_obj_t* parent)
     lv_obj_t* grid = lv_obj_create(control_screen);
     lv_obj_remove_style_all(grid);
     lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-    //lv_obj_set_width(grid, lv_pct(100));
     lv_obj_set_size(grid, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_style_pad_top(grid, 10, 0);
     lv_obj_set_style_pad_left(grid, 12, 0);
@@ -167,7 +155,7 @@ void control_screen_create(lv_obj_t* parent)
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     /* Create grid-like items (flex row wrap, non-scrollable) */
-    for (uint32_t i = 0; i < 6; i++) {
+    for (uint32_t i = 0; i < 5; i++) {
         lv_obj_t* item = lv_obj_create(grid);
         lv_obj_remove_style_all(item);
         lv_obj_set_width(item, lv_pct(46));
@@ -180,31 +168,19 @@ void control_screen_create(lv_obj_t* parent)
         lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(item, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        /* Make Silence and Bluetooth toggles */
-        if (i == CTRL_SILENCE || i == CTRL_BLUETOOTH) {
+        /* Make Bluetooth a toggle */
+        if (i == CTRL_BLUETOOTH) {
             lv_obj_add_flag(item, LV_OBJ_FLAG_CHECKABLE);
             lv_obj_set_style_bg_color(item, lv_color_hex(0x438bff), LV_PART_MAIN | LV_STATE_CHECKED);
             lv_obj_set_style_bg_opa(item, 255, LV_PART_MAIN | LV_STATE_CHECKED);
             lv_obj_add_event_cb(item, toggle_event_cb, LV_EVENT_VALUE_CHANGED, (void*)(uintptr_t)i);
 
-            if (i == CTRL_SILENCE) {
-                bool sound_on = settings_get_sound();
-                bool silent = !sound_on;
-                if (silent) {
-                    lv_obj_add_state(item, LV_STATE_CHECKED);
-                }
-                else {
-                    lv_obj_clear_state(item, LV_STATE_CHECKED);
-                }
+            bool ble_on = ble_sync_is_enabled();
+            if (ble_on) {
+                lv_obj_add_state(item, LV_STATE_CHECKED);
             }
-            if (i == CTRL_BLUETOOTH) {
-                bool ble_on = ble_sync_is_enabled();
-                if (ble_on) {
-                    lv_obj_add_state(item, LV_STATE_CHECKED);
-                }
-                else {
-                    lv_obj_clear_state(item, LV_STATE_CHECKED);
-                }
+            else {
+                lv_obj_clear_state(item, LV_STATE_CHECKED);
             }
         }
         else {
@@ -250,7 +226,6 @@ static void click_event_cb(lv_event_t* e)
         {
             lv_obj_t* t = ui_dynamic_tile_acquire();
             if (t) {
-                // Create the content into the dynamic tile and switch to it
                 lv_smartwatch_brightness_create(t);
                 ui_dynamic_tile_show();
             }
@@ -268,7 +243,6 @@ static void click_event_cb(lv_event_t* e)
         break;
     case CTRL_FLASHLIGHT:
         ESP_LOGI(TAG, "Flashlight control clicked");
-        //lv_indev_wait_release(lv_indev_active());
         {
             lv_obj_t* t = ui_dynamic_tile_acquire();
             if (t) {
@@ -279,7 +253,6 @@ static void click_event_cb(lv_event_t* e)
         break;
     case CTRL_SETTINGS:
         ESP_LOGI(TAG, "Settings clicked");
-         //lv_indev_wait_release(lv_indev_active());
         {
             lv_obj_t* t = ui_dynamic_tile_acquire();
             if (t) {
@@ -300,10 +273,6 @@ static void toggle_event_cb(lv_event_t* e)
     bool checked = lv_obj_has_state(obj, LV_STATE_CHECKED);
 
     switch (ctrl) {
-    case CTRL_SILENCE:
-        /* Silence ON means sound OFF */
-        settings_set_sound(!checked);
-        break;
     case CTRL_BLUETOOTH:
     {
         bool enable = checked;
@@ -324,5 +293,3 @@ static void toggle_event_cb(lv_event_t* e)
         break;
     }
 }
-
-/* Scroll callback removed: screen is static and non-scrollable */
