@@ -1,49 +1,121 @@
-# Smartwatch firmware for Waveshare ESP32-S3-Touch-AMOLED-2.06
+# ⌚ Smartwatch Firmware  
+**Waveshare ESP32-S3 Touch AMOLED 2.06"**
 
-This repository contains the firmware for the Waveshare ESP32-S3-Touch-AMOLED-2.06 smartwatch development board.
-More information about the board can be found on the Waveshare Wiki: [ESP32-S3-Touch-AMOLED-2.06 Wiki](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.06)
+Firmware for the **Waveshare ESP32-S3-Touch-AMOLED-2.06** smartwatch development board.  
+Designed for experimentation, UI development, and wearable prototyping using **ESP-IDF** and **LVGL**.
 
-<img src="ui_assets/s3watch_0.jpg" width="300"/>
-<img src="ui_assets/s3watch_1.jpg" width="300"/>
+📘 Official board documentation:  
+https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.06
 
-# Introduction
-ESP32-S3-Touch-AMOLED-2.06 is a high-performance, wearable watch-shaped development board launched by Waveshare. The product is based on the ESP32-S3R8 microcontroller, integrating a 2.06inch capacitive touch HD AMOLED screen, a six-axis sensor, RTC, an audio codec chip and power management and other functional modules. With a custom case, it looks and forms like a smart watch and is designed for prototyping and functional verification of wearable applications.
+<p float="left">
+  <img src="ui_assets/s3watch_0.jpg" width="280"/>
+  <img src="ui_assets/s3watch_1.jpg" width="280"/>
+</p>
 
-# Features
-Equipped with ESP32-S3R8 high-performance Xtensa 32-bit LX7 dual-core processor, up to 240MHz main frequency
-Supports 2.4GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 (BLE), with onboard antenna
-Built in 512KB SRAM and 384KB ROM, with onboard 8MB PSRAM and an external 32MB Flash
-Adopts Type-C interface to improve user convenience and device compatibility
+---
 
-# Hardware Description
-Onboard 2.06inch high-definition capacitive touch AMOLED screen with a resolution of 410×502, 16.7M colors for clear color pictures
-Embedded with CO5300 driver chip and FT3168 capacitive touch chip, communicating through QSPI and I2C interfaces respectively, minimizes required IO pins
-Onboard QMI8658 6-axis IMU (3-axis accelerometer and 3-axis gyroscope) for detecting motion gesture, step counting, etc.
-Onboard PCF85063 RTC chip connected to the battery via the AXP2101 for uninterrupted power supply
-Onboard PWR and BOOT two side buttons with customizable functions, allowing for custom function development
-Onboard 3.7V MX1.25 lithium battery recharge/discharge header
-Bring out 1 x I2C port, 1 x UART port, and 1 x USB pad, which can be used for external device connection and debugging
-Onboard TF card slot for extended storage and fast data transfer, flexible for data recording and media playback, simplifying circuit design
-The benefits of using AXP2101 include efficient power management, support for multiple output voltages, charging and battery management functions, and optimization for battery life
-The AMOLED screen has the advantages of higher contrast, wider viewing angle, richer colors, faster response, thinner design, lower power consumption, and flexibility
+## Overview
 
-# Building and Flashing (Visual Studio Code + ESP-IDF)
+The **ESP32-S3-Touch-AMOLED-2.06** is a watch-shaped development board built around the **ESP32-S3R8** MCU.  
+It integrates an AMOLED touch display, sensors, RTC, power management, audio codec, and SD card support, making it ideal for smartwatch and wearable firmware development.
 
-This project targets the ESP32-S3 and works seamlessly with the ESP-IDF VS Code extension. The steps below assume you are using Visual Studio Code with the official ESP-IDF tooling:
+This repository provides a functional smartwatch firmware with a modern UI and extensible architecture.
 
-1.  **Install prerequisites:** Install [Visual Studio Code](https://code.visualstudio.com/) and add the official [ESP-IDF Extension](https://marketplace.visualstudio.com/items?itemName=espressif.esp-idf-extension). When prompted, let the extension install the ESP-IDF tools or point it to an existing ESP-IDF 5.x setup.
-2.  **Configure the extension:** Open the command palette (`Ctrl+Shift+P`) and run `ESP-IDF: Configure ESP-IDF extension`. Follow the wizard to select your ESP-IDF directory, Python environment, and tools folder. The wizard will also verify the toolchain installation.
-3.  **Open the project folder:** Use `File → Open Folder...` to open the repository root (`S3Watch`). The ESP-IDF status bar should appear at the bottom once the extension detects the project.
-4.  **Set the target:** From the ESP-IDF status bar, choose `Set Target` (or run `ESP-IDF: Set Target` from the command palette) and select `esp32s3`.
-5.  **Build:** Click `Build Project` in the status bar or run `ESP-IDF: Build Project`. The extension launches `idf.py build` in an integrated terminal and streams the output.
-6.  **Select the serial port:** Connect the Waveshare board via USB, then use `ESP-IDF: Select Serial Port` to choose the appropriate port (e.g., `COMx` on Windows or `/dev/ttyUSBx` on Linux/macOS).
-7.  **Flash and monitor:** Trigger `ESP-IDF: Flash (UART)` to program the firmware. For combined flashing and serial monitoring, use `ESP-IDF: Flash and Monitor`. The integrated monitor can be closed with `Ctrl+]` followed by `Ctrl+d`
+---
 
-# Dependencies
+## ✅ Current Features
 
-The project utilizes several components managed by the ESP-IDF Component Manager, as defined in `main/idf_component.yml` and `dependencies.lock`:
+- [x] Battery status & charging information  
+- [x] Screen brightness control  
+- [x] Bluetooth (BLE) support  
+- [x] Time & date configuration  
+- [x] Multiple watch face styles  
+- [x] Change background wallpaper from SD card  
+- [x] Touch-based UI powered by LVGL  
+- [x] RTC-backed time keeping  
 
-- `esp32_s3_touch_amoled_2_06`: Board support package for the Waveshare ESP32-S3-Touch-AMOLED-2.06.
-- `lvgl/lvgl`: LVGL graphics library for UI development.
+---
 
-These dependencies are automatically fetched by the ESP-IDF build system.
+## 🚧 Planned Features
+
+- [ ] MP3 audio playback from SD card  
+- [ ] MP4 video playback from SD card  
+- [ ] PDF reader from SD card (experimental / TBD)  
+- [ ] Mini games (simple touch-based games)  
+- [ ] Improved power-saving modes  
+- [ ] Additional watch face themes  
+
+---
+
+## Hardware Highlights
+
+- **MCU:** ESP32-S3R8 (Dual-core Xtensa LX7 @ up to 240 MHz)  
+- **Display:** 2.06" AMOLED, 410 × 502, capacitive touch  
+- **Wireless:** Wi-Fi 2.4 GHz + Bluetooth 5 (BLE)  
+- **Memory:**  
+  - 512 KB SRAM  
+  - 384 KB ROM  
+  - 8 MB PSRAM  
+  - 32 MB external Flash  
+- **Sensors:** QMI8658 6-axis IMU  
+- **RTC:** PCF85063 (battery-backed)  
+- **Power Management:** AXP2101  
+- **Storage:** TF (microSD) card slot  
+- **Connectivity:** USB Type-C, I2C, UART  
+
+---
+
+## Software Stack
+
+- **Framework:** ESP-IDF (v5.x recommended)  
+- **UI Library:** LVGL  
+- **Board Support:** `esp32_s3_touch_amoled_2_06` BSP  
+
+Dependencies are automatically handled via **ESP-IDF Component Manager**.
+
+---
+
+## Building & Flashing (ESP-IDF + VS Code)
+
+This project is intended to be built using **Visual Studio Code** with the official **ESP-IDF extension**.
+
+### Basic Steps
+
+1. Install **Visual Studio Code**
+2. Install the **ESP-IDF Extension**
+3. Open this repository folder
+4. Set target to `esp32s3`
+5. Build the project
+6. Flash to the device via USB
+
+---
+
+## 🔥 Flashing the Firmware
+
+To flash, erase, or recover the firmware properly, **follow the official Waveshare flashing guide**:
+
+📘 **Firmware Flashing & Erasing Guide**  
+https://www.waveshare.com/wiki/Flash_Firmware_Flashing_and_Erasing
+
+This guide covers:
+- Boot mode usage
+- Flash erase
+- UART flashing
+- Common recovery scenarios
+
+---
+
+## Repository Purpose
+
+This project aims to:
+- Provide a clean smartwatch firmware baseline  
+- Demonstrate LVGL on AMOLED displays  
+- Enable experimentation with wearable features  
+- Serve as a foundation for custom smartwatch applications  
+
+---
+
+## License
+
+This project is provided for educational and development purposes.  
+Refer to individual component licenses (ESP-IDF, LVGL) for details.
