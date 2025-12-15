@@ -179,6 +179,9 @@ static uint8_t notify_volume = 100; // percent 0..100 (louder default)
 static uint32_t step_goal = 8000;
 static bool time_format_24h = true; // true = 24h format, false = 12h format
 static bool spiffs_ready = false;
+static uint8_t watchface_style = 0;  // Default: Classic style
+
+
 
 // Debounced save timer (to limit flash writes when sliders change)
 static TimerHandle_t s_save_timer = NULL;
@@ -202,7 +205,22 @@ static void schedule_save(void)
     (void)xTimerChangePeriod(s_save_timer, delay_ticks, 0);
     (void)xTimerStart(s_save_timer, 0);
 }
+uint8_t settings_get_watchface_style(void)
+{
+    return watchface_style;
+}
 
+void settings_set_watchface_style(uint8_t style)
+{
+    if (style >= 7) {
+        ESP_LOGW(TAG, "Invalid watchface style: %d, using Classic", style);
+        style = 0;
+    }
+    
+    watchface_style = style;
+    ESP_LOGI(TAG, "Watchface style set to: %d", style);
+    schedule_save();
+}
 #define SETTINGS_PARTITION "storage"
 #define SETTINGS_FILE      "/spiffs/settings.json"
 
@@ -276,7 +294,7 @@ static bool settings_write_json(void)
     cJSON_AddNumberToObject(root, "notify_volume", (double)notify_volume);
     cJSON_AddNumberToObject(root, "step_goal", (double)step_goal);
     cJSON_AddBoolToObject(root, "time_format_24h", time_format_24h);
-
+    cJSON_AddNumberToObject(root, "watchface_style", watchface_style);
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!json_str) return false;
@@ -338,6 +356,8 @@ static bool settings_read_json(void)
     if (cJSON_IsNumber(j)) step_goal = (uint32_t)j->valuedouble;
     j = cJSON_GetObjectItem(root, "time_format_24h");
     if (cJSON_IsBool(j)) time_format_24h = cJSON_IsTrue(j);
+    j = cJSON_GetObjectItem(root, "watchface_style");
+if (cJSON_IsNumber(j)) watchface_style = (uint8_t)j->valuedouble;
     cJSON_Delete(root);
     // Apply to hardware where relevant
     bsp_display_brightness_set(brightness);
@@ -483,6 +503,7 @@ static void apply_defaults(void)
     step_goal = 8000;
     bluetooth_enabled = true;
     time_format_24h = true;
+    watchface_style = 0;
 }
 
 bool settings_reset_defaults(void)

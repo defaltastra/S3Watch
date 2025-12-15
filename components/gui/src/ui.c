@@ -347,7 +347,7 @@ void ui_task(void* pvParameters) {
   esp_event_handler_register(BLE_SYNC_EVENT_BASE, ESP_EVENT_ANY_ID, ble_ui_evt,
     NULL);
 
-  xTaskCreate(ui_back_btn_task, "ui_back_btn", 2048, NULL, 5, NULL);
+  xTaskCreate(ui_back_btn_task, "ui_back_btn", 4096, NULL, 5, NULL);
 
   lv_timer_t* t = lv_timer_create(power_poll_cb, 5000, NULL);
   lv_timer_ready(t);
