@@ -14,12 +14,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "power_button.h"
 // Power management
 #include "esp_sleep.h"
 #include "sdkconfig.h"
 #if CONFIG_PM_ENABLE
 #include "esp_pm.h"
 #endif
+
+
 
 // If the board provides simple GPIO buttons, use one as wake key.
 // On this hardware BSP_CAPS_BUTTONS is 0, so we will use the PMU PWR key
@@ -73,7 +76,8 @@ void display_manager_turn_on(void) {
     // Wake the panel first, clear panel, then resume LVGL and restore brightness
     bsp_display_wake();
     (void)bsp_display_clear_black();
-    lvgl_port_resume();
+    lvgl_port_resume();  // Poll AXP2101 power key short-press event
+
 
     if (lvgl_port_lock(200)) {
 #if LVGL_VERSION_MAJOR >= 9
@@ -145,17 +149,72 @@ static bool wake_button_pressed(void) {
 #if BSP_CAPS_BUTTONS
   return gpio_get_level(DISPLAY_BUTTON) == 0;
 #else
-  // Poll AXP2101 power key short-press event
   return bsp_power_poll_pwr_button_short();
 #endif
+}
+
+static void show_sleep_overlay(void) {
+  if (bsp_display_lock(100)) {
+    // Create full-screen overlay
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_90, 0);
+    
+    // Add text
+    lv_obj_t *label = lv_label_create(overlay);
+    lv_label_set_text(label, 
+      LV_SYMBOL_POWER " Entering Sleep Mode\n\n"
+      "Press power button to wake\n\n"
+      "Time will be preserved");
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(label);
+    
+    lv_refr_now(NULL);
+    bsp_display_unlock();
+  }
 }
 
 static void display_manager_task(void *arg) {
   ESP_LOGI(TAG, "Display manager task started");
   TickType_t last = xTaskGetTickCount();
+  
   while (1) {
+    // ═══════════════════════════════════════════════════════════════
+    // CHECK FOR LONG PRESS → DEEP SLEEP
+    // ═══════════════════════════════════════════════════════════════
+    if (power_button_long_press_detected()) {
+      ESP_LOGI(TAG, "🔋 Long press detected - preparing for deep sleep");
+      
+      // Clear the flag
+      power_button_clear_long_press();
+      
+      // Turn display on if it's off (to show message)
+      if (!display_on) {
+        display_manager_turn_on();
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+      
+      // Show "Going to sleep" message
+      show_sleep_overlay();
+      
+      // Brief delay to show message
+      vTaskDelay(pdMS_TO_TICKS(1500));
+      UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+ESP_LOGI(TAG, "display_mgr stack HWM: %u words", hwm);
+
+      // Enter deep sleep (never returns)
+      enter_deep_sleep();
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // NORMAL DISPLAY MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════
     // Refresh timeout from settings to apply changes immediately
     timeout_ms = settings_get_display_timeout();
+    
     if (display_on) {
       uint32_t inactive = lv_disp_get_inactive_time(NULL);
       if (inactive >= timeout_ms) {
@@ -173,6 +232,7 @@ static void display_manager_task(void *arg) {
         last = xTaskGetTickCount();
       }
     }
+    
     vTaskDelayUntil(&last, pdMS_TO_TICKS(50));
   }
 }
@@ -195,7 +255,6 @@ void display_manager_init(void) {
   lv_obj_add_event_cb(lv_scr_act(), touch_event_cb, 
     LV_EVENT_PRESSED | LV_EVENT_PRESSING | LV_EVENT_RELEASED | LV_EVENT_CLICKED | LV_EVENT_LONG_PRESSED | LV_EVENT_LONG_PRESSED_REPEAT | LV_EVENT_GESTURE, NULL);
 
-  // PM lock may be created in early init; if not, create and acquire now
 #if CONFIG_PM_ENABLE
   if (!s_no_ls_lock) {
     (void)esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "display",
@@ -205,37 +264,8 @@ void display_manager_init(void) {
     (void)esp_pm_lock_acquire(s_no_ls_lock);
   }
 #endif
-/*
-  // Configure GPIO wake-ups so user input can wake CPU from light sleep
-  // Only meaningful if PM/light-sleep is enabled and wake pins are wired.
-#if CONFIG_PM_ENABLE
-  // Touch INT is active-low on this board
-  gpio_config_t touch_io = {
-      .pin_bit_mask = 1ULL << BSP_LCD_TOUCH_INT,
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_ENABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-  (void)gpio_config(&touch_io);
-  (void)gpio_wakeup_enable(BSP_LCD_TOUCH_INT, GPIO_INTR_LOW_LEVEL);
-#ifdef CONFIG_PMU_INTERRUPT_PIN
-  // PMU IRQ (e.g., power key) also active-low
-  gpio_config_t pmu_io = {
-      .pin_bit_mask = 1ULL << CONFIG_PMU_INTERRUPT_PIN,
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_ENABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-  (void)gpio_config(&pmu_io);
-  (void)gpio_wakeup_enable(CONFIG_PMU_INTERRUPT_PIN, GPIO_INTR_LOW_LEVEL);
-#endif
-  (void)esp_sleep_enable_gpio_wakeup();
-#endif // CONFIG_PM_ENABLE
-*/
-  // Higher priority so UI updates aren't delayed by other workloads
-  xTaskCreate(display_manager_task, "display_mgr", 4000, NULL, 3, NULL);
+
+  xTaskCreate(display_manager_task, "display_mgr", 8192, NULL, 3, NULL);
 }
 
 void display_manager_pm_early_init(void) {
@@ -248,7 +278,6 @@ void display_manager_pm_early_init(void) {
     (void)esp_pm_lock_acquire(s_no_ls_lock);
   }
 #else
-  // No power management; nothing to do
   (void)0;
 #endif
 }

@@ -16,7 +16,16 @@
 #include <string.h>
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "pcf85063a.h"
 
+// PCF85063A register addresses
+#ifndef PCF85063A_CTRL1
+#define PCF85063A_CTRL1    0x00
+#define PCF85063A_CTRL2    0x01
+#define PCF85063A_SECONDS  0x04
+#endif
+
+// External function to read RTC registers
 // Add these NVS keys
 #define NVS_KEY_WALLPAPER "wallpaper"
 #define NVS_KEY_WALLPAPER_W "wall_w"
@@ -27,6 +36,7 @@
 #define NVS_KEY_TIME_HOUR "time_hour"
 #define NVS_KEY_TIME_MIN "time_min"
 #define NVS_KEY_TIME_SEC "time_sec"
+extern int rtc_register_read(uint8_t regAddr, uint8_t *data, uint8_t len);
 
 esp_err_t settings_save_time(const struct tm* time)
 {
@@ -371,38 +381,73 @@ void settings_init(void) {
 
     bsp_display_brightness_set(brightness);
 
+    // Debug dump of hardware RTC registers
+    rtc_debug_dump();
+    
+    // ✅ Wait for RTC timer task to run at least once (runs every 1000ms)
+    vTaskDelay(pdMS_TO_TICKS(1100));
+
+    struct tm hw_time;
+    if (rtc_get_time(&hw_time) == ESP_OK) {
+        ESP_LOGI(TAG, "Hardware RTC: %04d-%02d-%02d %02d:%02d:%02d (tm_year=%d)",
+                 hw_time.tm_year + 1900, hw_time.tm_mon + 1, hw_time.tm_mday,
+                 hw_time.tm_hour, hw_time.tm_min, hw_time.tm_sec, hw_time.tm_year);
+        
+        // Check if year is valid (>= 2020)
+        if (hw_time.tm_year >= 120 && hw_time.tm_year < 200) {
+            ESP_LOGI(TAG, "✅ Hardware RTC valid! Using it!");
+            // Save to NVS as backup
+            settings_save_time(&hw_time);
+            return; // Success!
+        } else {
+            ESP_LOGW(TAG, "Hardware RTC year invalid (%d), loading backup", hw_time.tm_year);
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to read hardware RTC");
+    }
+    
+    // Fallback: Load from NVS
     struct tm loaded;
     if (settings_load_time(&loaded) == ESP_OK) {
-        ESP_LOGI(TAG, "Restoring RTC from NVS");
-        rtc_set_time(&loaded);
+        ESP_LOGI(TAG, "Restoring time from NVS: %04d-%02d-%02d %02d:%02d:%02d",
+                 loaded.tm_year + 1900, loaded.tm_mon + 1, loaded.tm_mday,
+                 loaded.tm_hour, loaded.tm_min, loaded.tm_sec);
+        
+        // ✅ Write to hardware RTC so it persists!
+        esp_err_t set_err = rtc_set_time(&loaded);
+        if (set_err == ESP_OK) {
+            ESP_LOGI(TAG, "Hardware RTC initialized from NVS backup");
+            
+            // Verify it was written correctly
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGI(TAG, "After writing to hardware:");
+            rtc_debug_dump();
+        } else {
+            ESP_LOGE(TAG, "Failed to set hardware RTC: %s", esp_err_to_name(set_err));
+        }
     } else {
-        ESP_LOGI(TAG, "No stored time found in NVS");
-    }
-
-    struct tm time;
-    if (rtc_get_time(&time) == ESP_OK) {
-        if (time.tm_year < 120) {
-            ESP_LOGI(TAG, "Time appears invalid, setting to default");
-            struct tm default_time = {
-                .tm_year = 125,
-                .tm_mon = 0,
-                .tm_mday = 1,
-                .tm_hour = 12,
-                .tm_min = 0,
-                .tm_sec = 0
-            };
-            rtc_set_time(&default_time);
+        ESP_LOGI(TAG, "No backup, setting default time");
+        struct tm default_time = {
+            .tm_year = 125,  // 2025
+            .tm_mon = 11,    // December (0-based)
+            .tm_mday = 17,
+            .tm_hour = 12,
+            .tm_min = 0,
+            .tm_sec = 0,
+            .tm_wday = 2     // Tuesday
+        };
+        mktime(&default_time);
+        
+        // ✅ Write to hardware RTC
+        esp_err_t set_err = rtc_set_time(&default_time);
+        if (set_err == ESP_OK) {
+            ESP_LOGI(TAG, "Hardware RTC initialized with default time");
             settings_save_time(&default_time);
         } else {
-            ESP_LOGI(TAG, "RTC time looks valid: %04d-%02d-%02d",
-                     time.tm_year + 1900, time.tm_mon + 1, time.tm_mday);
+            ESP_LOGE(TAG, "Failed to set default time: %s", esp_err_to_name(set_err));
         }
     }
-
-    rtc_start();
 }
-
-
 void settings_set_brightness(uint8_t level) {
     brightness = level;
     bsp_display_brightness_set(brightness);

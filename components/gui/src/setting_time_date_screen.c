@@ -24,7 +24,11 @@ static const char* style_names[] = {
     "Gruvbox (Corner)",
     "Monochrome (Bar)",
     "Neon (Centered)",
-    "Pastel (Horizontal)"
+    "Pastel (Horizontal)",
+    "Analog Classic",
+    "Analog Modern",
+    "Analog Minimal",
+    "Analog Skeleton"
 };
 
 static void on_delete(lv_event_t* e);

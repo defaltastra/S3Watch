@@ -15,6 +15,8 @@
 #include "pcf85063a.h"
 #include "ble_sync.h"
 #include "nvs_flash.h"
+#include <sys/time.h>
+
 static const char *TAG = "bsp_extra_board";
 
 static i2c_master_bus_handle_t bus_handle;
@@ -68,57 +70,98 @@ int rtc_register_write(uint8_t regAddr, uint8_t *data, uint8_t len) {
 esp_err_t bsp_extra_init(void)
 {
     esp_err_t ret;
-    
+
+    /* ---------- NVS ---------- */
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "NVS partition needs erase, erasing...");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    
+
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(ret));
     } else {
         ESP_LOGI(TAG, "NVS initialized successfully");
     }
-    
+
+    /* ---------- Event loop ---------- */
     (void)esp_event_loop_create_default();
-    
+
+    /* ---------- I2C / RTC ---------- */
     bus_handle = bsp_i2c_get_handle();
-    
+
     ret = bsp_rtc_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "RTC init failed");
         return ret;
     }
-    
+
     ret = pcf85063a_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "PCF85063A init failed");
         return ret;
     }
-    
-    struct tm saved_time;
-    if (settings_load_time(&saved_time) == ESP_OK) {
-        if (pcf85063a_set_time(&saved_time) == ESP_OK) {
-            ESP_LOGI(TAG, "Time restored from NVS: %04d-%02d-%02d %02d:%02d:%02d",
-                     saved_time.tm_year + 1900, saved_time.tm_mon + 1, saved_time.tm_mday,
-                     saved_time.tm_hour, saved_time.tm_min, saved_time.tm_sec);
-        }
+
+    /* ---------- TIME SOURCE SELECTION ---------- */
+    struct tm rtc_time;
+
+    if (pcf85063a_get_time(&rtc_time) == ESP_OK &&
+        rtc_time.tm_year >= 120) {   // >= year 2020 sanity check
+
+        setenv("TZ", "UTC0", 1);
+        tzset();
+
+        time_t now = mktime(&rtc_time);
+        struct timeval tv = {
+            .tv_sec = now,
+            .tv_usec = 0
+        };
+        settimeofday(&tv, NULL);
+
+        ESP_LOGI(TAG,
+                 "Using RTC time: %04d-%02d-%02d %02d:%02d:%02d",
+                 rtc_time.tm_year + 1900,
+                 rtc_time.tm_mon + 1,
+                 rtc_time.tm_mday,
+                 rtc_time.tm_hour,
+                 rtc_time.tm_min,
+                 rtc_time.tm_sec);
+
+        /* Save fresh RTC time to NVS */
+        settings_save_time(&rtc_time);
+
     } else {
-        ESP_LOGI(TAG, "No saved time found in NVS, using RTC hardware time");
+        struct tm saved_time;
+
+        if (settings_load_time(&saved_time) == ESP_OK) {
+            pcf85063a_set_time(&saved_time);
+
+            ESP_LOGW(TAG,
+                     "RTC invalid, restored from NVS: %04d-%02d-%02d %02d:%02d:%02d",
+                     saved_time.tm_year + 1900,
+                     saved_time.tm_mon + 1,
+                     saved_time.tm_mday,
+                     saved_time.tm_hour,
+                     saved_time.tm_min,
+                     saved_time.tm_sec);
+        } else {
+            ESP_LOGE(TAG, "No valid time source available");
+        }
     }
-    
+
+    /* ---------- BLE ---------- */
     ret = ble_sync_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BLE sync init failed");
         return ret;
-    }       
-    
+    }
+
+    /* ---------- Power ---------- */
     ret = bsp_power_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Power init failed");
     }
-    
+
     return ESP_OK;
 }

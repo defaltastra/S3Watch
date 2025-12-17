@@ -111,13 +111,29 @@ esp_err_t pcf85063a_get_time(struct tm *time)
         return ret;
     }
 
-    time->tm_sec = bcd_to_dec(time_buf[0] & PCF85063A_SECONDS_MASK);
-    time->tm_min = bcd_to_dec(time_buf[1] & PCF85063A_MINUTES_MASK);
-    time->tm_hour = bcd_to_dec(time_buf[2] & PCF85063A_HOURS_MASK);
-    time->tm_mday = bcd_to_dec(time_buf[3] & PCF85063A_DAYS_MASK);
-    time->tm_wday = bcd_to_dec(time_buf[4] & PCF85063A_WEEKDAYS_MASK);
-    time->tm_mon = bcd_to_dec(time_buf[5] & PCF85063A_MONTHS_MASK) - 1;
-    time->tm_year = bcd_to_dec(time_buf[6]) + 100;
+    // Apply masks and convert
+    uint8_t sec_bcd = time_buf[0] & PCF85063A_SECONDS_MASK;
+    uint8_t min_bcd = time_buf[1] & PCF85063A_MINUTES_MASK;
+    uint8_t hour_bcd = time_buf[2] & PCF85063A_HOURS_MASK;
+    uint8_t day_bcd = time_buf[3] & PCF85063A_DAYS_MASK;
+    uint8_t wday_bcd = time_buf[4] & PCF85063A_WEEKDAYS_MASK;
+    uint8_t mon_bcd = time_buf[5] & PCF85063A_MONTHS_MASK;
+    uint8_t year_bcd = time_buf[6];
+
+    ESP_LOGI("PCF85063A", "Masked BCD: sec=0x%02X min=0x%02X hour=0x%02X day=0x%02X wday=0x%02X mon=0x%02X year=0x%02X",
+             sec_bcd, min_bcd, hour_bcd, day_bcd, wday_bcd, mon_bcd, year_bcd);
+
+    time->tm_sec = bcd_to_dec(sec_bcd);
+    time->tm_min = bcd_to_dec(min_bcd);
+    time->tm_hour = bcd_to_dec(hour_bcd);
+    time->tm_mday = bcd_to_dec(day_bcd);
+    time->tm_wday = bcd_to_dec(wday_bcd);
+    time->tm_mon = bcd_to_dec(mon_bcd) - 1;  // RTC stores 1-12, tm_mon is 0-11
+    time->tm_year = bcd_to_dec(year_bcd) + 100;  // RTC stores 0-99 for 2000-2099
+
+    ESP_LOGI("PCF85063A", "Final tm: year=%d mon=%d day=%d hour=%d min=%d sec=%d wday=%d",
+             time->tm_year, time->tm_mon, time->tm_mday, time->tm_hour, 
+             time->tm_min, time->tm_sec, time->tm_wday);
 
     return ESP_OK;
 }

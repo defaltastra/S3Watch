@@ -9,10 +9,14 @@ typedef enum {
     WATCHFACE_STYLE_CLASSIC = 0,    // Original: Large colorful numbers
     WATCHFACE_STYLE_MINIMAL,        // Minimalist: Single line, white
     WATCHFACE_STYLE_DIGITAL,        // Digital clock style: HH:MM:SS
-    WATCHFACE_STYLE_GRADIENT,       // Gradient colors
+    WATCHFACE_STYLE_GRUVBOX,        // Gruvbox warm retro colors
     WATCHFACE_STYLE_MONOCHROME,     // Black & white
     WATCHFACE_STYLE_NEON,           // Bright neon colors
     WATCHFACE_STYLE_PASTEL,         // Soft pastel colors
+    WATCHFACE_STYLE_ANALOG_CLASSIC, // Large traditional analog clock
+    WATCHFACE_STYLE_ANALOG_MODERN,  // Medium colorful analog clock
+    WATCHFACE_STYLE_ANALOG_MINIMAL, // Small minimalist analog clock
+    WATCHFACE_STYLE_ANALOG_SKELETON,// Transparent skeleton analog clock
     WATCHFACE_STYLE_COUNT
 } watchface_style_t;
 

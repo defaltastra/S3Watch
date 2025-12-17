@@ -3,7 +3,7 @@ idf_component_register(
         lwmalloc.c
         main.cpp
     INCLUDE_DIRS "."
-    REQUIRES ble_sync gui sensors settings bsp_extra esp_event audio_alert
+    REQUIRES ble_sync gui sensors settings bsp_extra esp_event audio_alert power_management
 )
 
 ## enable the next line to upload the spiffs content
